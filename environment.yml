@@ -1,0 +1,11 @@
+name: ppi-splitting-pipeline
+channels:
+  - conda-forge
+  - bioconda
+  - defaults
+dependencies:
+  - python=3.14
+  - certifi
+  - blast
+  - cd-hit
+  - kahip
