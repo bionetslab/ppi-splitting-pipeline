@@ -9,3 +9,4 @@ dependencies:
   - blast
   - cd-hit
   - kahip
+  - multiqc

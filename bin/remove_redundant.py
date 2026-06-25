@@ -16,6 +16,7 @@ PPIs are filtered so both partners must still be present.
 
 import argparse
 import csv
+import json
 import sys
 
 
@@ -66,6 +67,57 @@ def write_csv(pairs, path):
         writer = csv.writer(fh)
         writer.writerow(["protein1", "protein2"])
         writer.writerows(pairs)
+
+
+def write_mqc(split_results):
+    gs_data = {
+        r["name"]: {
+            "n_ppis_pos": r["n_ppis_nr"],
+            "n_proteins": r["n_proteins_nr"],
+            "n_ppis_removed": r["n_ppis_removed"],
+            "n_proteins_removed": r["n_proteins_removed"],
+        }
+        for r in split_results
+    }
+    sim_bar_data = {
+        r["name"]: {
+            "Kept (dissimilar to train)": r["n_proteins_nr"],
+            "Removed (similar to train)": r["n_proteins_removed"],
+        }
+        for r in split_results
+        if r["name"] != "train"
+    }
+
+    sections = [
+        {
+            "id": "nr_generalstats",
+            "plot_type": "generalstats",
+            "pconfig": [
+                {"n_ppis_pos": {"title": "PPIs (pos)", "description": "Positive PPIs in the split after redundancy removal", "format": "{:,.0f}", "scale": "Blues"}},
+                {"n_proteins": {"title": "Proteins", "description": "Unique proteins in the split after redundancy removal", "format": "{:,.0f}", "scale": "Greens"}},
+                {"n_ppis_removed": {"title": "PPIs removed", "description": "PPIs removed because a partner protein was similar to a training protein", "format": "{:,.0f}", "scale": "Reds"}},
+                {"n_proteins_removed": {"title": "Proteins removed", "description": "Proteins removed due to sequence similarity with the training set (CD-HIT-2D)", "format": "{:,.0f}", "scale": "Oranges"}},
+            ],
+            "data": gs_data,
+        },
+        {
+            "id": "similarity_bar",
+            "section_name": "Sequence Similarity Filtering",
+            "description": (
+                "Val and test proteins removed because they share ≥40% sequence identity "
+                "with a training protein (CD-HIT-2D). Training proteins are never removed."
+            ),
+            "plot_type": "bargraph",
+            "pconfig": {
+                "id": "similarity_bar_plot",
+                "title": "Similarity to Training Set: val and test proteins",
+                "ylab": "# Proteins",
+            },
+            "data": sim_bar_data,
+        },
+    ]
+    with open("remove_redundant_mqc.json", "w") as fh:
+        json.dump(sections, fh, indent=2)
 
 
 def write_fasta(seqs, proteins, path):
@@ -120,6 +172,30 @@ def main():
         ("test_nr",  test_ppis_nr,  test_prot_nr),
     ]:
         print(f"{name}: {len(ppis)} PPIs, {len(prot)} proteins", file=sys.stderr)
+
+    write_mqc([
+        {
+            "name": "train",
+            "n_ppis_nr": len(train_ppis_nr),
+            "n_proteins_nr": len(train_prot_nr),
+            "n_ppis_removed": 0,
+            "n_proteins_removed": 0,
+        },
+        {
+            "name": "val",
+            "n_ppis_nr": len(val_ppis_nr),
+            "n_proteins_nr": len(val_prot_nr),
+            "n_ppis_removed": len(val_ppis) - len(val_ppis_nr),
+            "n_proteins_removed": len(set(val_seqs)) - len(val_prot_nr),
+        },
+        {
+            "name": "test",
+            "n_ppis_nr": len(test_ppis_nr),
+            "n_proteins_nr": len(test_prot_nr),
+            "n_ppis_removed": len(test_ppis) - len(test_ppis_nr),
+            "n_proteins_removed": len(set(test_seqs)) - len(test_prot_nr),
+        },
+    ])
 
 
 if __name__ == "__main__":

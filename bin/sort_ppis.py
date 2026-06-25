@@ -10,6 +10,7 @@ Rules:
 
 import argparse
 import csv
+import json
 import sys
 from collections import defaultdict
 
@@ -70,6 +71,43 @@ def write_csv(pairs, path):
         writer.writerows(pairs)
 
 
+def write_mqc(n_input, split_results):
+    n_assigned = sum(r["n_ppis"] for r in split_results)
+    n_discarded = n_input - n_assigned
+
+    bar_data = {r["name"]: {"PPIs": r["n_ppis"]} for r in split_results}
+    bar_data["discarded"] = {"PPIs": n_discarded}
+
+    sections = [
+        {
+            "id": "split_generalstats",
+            "plot_type": "generalstats",
+            "pconfig": [
+                {"n_ppis_discarded_kahip": {"title": "PPIs discarded (KaHIP)", "description": "Cross-partition PPIs discarded during KaHIP partitioning (total, same for all splits)", "format": "{:,.0f}", "scale": "Greys"}},
+            ],
+            "data": {r["name"]: {"n_ppis_discarded_kahip": n_discarded} for r in split_results},
+        },
+        {
+            "id": "split_bar",
+            "section_name": "PPI Partitioning",
+            "description": (
+                f"Of {n_input:,} input PPIs, {n_assigned:,} were assigned to a split "
+                f"and {n_discarded:,} were discarded because their two proteins landed "
+                "in different KaHIP partitions."
+            ),
+            "plot_type": "bargraph",
+            "pconfig": {
+                "id": "split_bar_plot",
+                "title": "PPI Partitioning: edges per split",
+                "ylab": "# PPIs",
+            },
+            "data": bar_data,
+        },
+    ]
+    with open("sort_ppis_mqc.json", "w") as fh:
+        json.dump(sections, fh, indent=2)
+
+
 def write_fasta(seqs, proteins, path):
     with open(path, "w") as fh:
         for p in sorted(proteins):
@@ -117,12 +155,16 @@ def main():
         )
 
     split_names = ["train", "val", "test"]
+    split_results = []
     for name, part in zip(split_names, ranked + [None] * (3 - len(ranked))):
         pairs = part_ppis[part] if part is not None else []
         proteins = {p for pair in pairs for p in pair}
         write_csv(pairs, f"{name}.csv")
         write_fasta(seqs, proteins, f"{name}.fasta")
         print(f"{name}: {len(pairs)} PPIs, {len(proteins)} proteins", file=sys.stderr)
+        split_results.append({"name": name, "n_ppis": len(pairs), "n_proteins": len(proteins)})
+
+    write_mqc(len(ppis), split_results)
 
 
 if __name__ == "__main__":

@@ -33,6 +33,7 @@ process GET_LENGTHS {
 }
 
 process RUN_BLAST {
+    publishDir "${params.outdir}/similarities", mode: 'copy'
     tag "blast"
 
     input:
@@ -55,7 +56,7 @@ process RUN_BLAST {
 }
 
 process MAKE_METIS {
-    publishDir "${params.outdir}", mode: 'copy'
+    publishDir "${params.outdir}/similarities", mode: 'copy'
     tag "metis"
 
     input:
@@ -78,7 +79,7 @@ process MAKE_METIS {
 }
 
 process RUN_KAHIP {
-    publishDir "${params.outdir}", mode: 'copy'
+    publishDir "${params.outdir}/similarities", mode: 'copy'
     tag "kahip"
 
     input:
@@ -99,7 +100,6 @@ process RUN_KAHIP {
 }
 
 process SORT_PPIS {
-    publishDir "${params.outdir}", mode: 'copy'
     tag "sort"
 
     input:
@@ -109,12 +109,13 @@ process SORT_PPIS {
     path node_mapping
 
     output:
-    path "train.csv",   emit: train_ppis
-    path "val.csv",     emit: val_ppis
-    path "test.csv",    emit: test_ppis
-    path "train.fasta", emit: train_fasta
-    path "val.fasta",   emit: val_fasta
-    path "test.fasta",  emit: test_fasta
+    path "train.csv",          emit: train_ppis
+    path "val.csv",            emit: val_ppis
+    path "test.csv",           emit: test_ppis
+    path "train.fasta",        emit: train_fasta
+    path "val.fasta",          emit: val_fasta
+    path "test.fasta",         emit: test_fasta
+    path "sort_ppis_mqc.json", emit: mqc
 
     script:
     """
@@ -162,12 +163,13 @@ process REMOVE_REDUNDANT {
     path sim_train_test, stageAs: 'sim_train_test.out'
 
     output:
-    path "train_nr.csv",   emit: train_ppis
-    path "val_nr.csv",     emit: val_ppis
-    path "test_nr.csv",    emit: test_ppis
-    path "train_nr.fasta", emit: train_fasta
-    path "val_nr.fasta",   emit: val_fasta
-    path "test_nr.fasta",  emit: test_fasta
+    path "train_nr.csv",              emit: train_ppis
+    path "val_nr.csv",                emit: val_ppis
+    path "test_nr.csv",               emit: test_ppis
+    path "train_nr.fasta",            emit: train_fasta
+    path "val_nr.fasta",              emit: val_fasta
+    path "test_nr.fasta",             emit: test_fasta
+    path "remove_redundant_mqc.json", emit: mqc
 
     script:
     """
@@ -196,6 +198,8 @@ process SAMPLE_NEGATIVES {
     path "train_negatives.csv"
     path "val_negatives.csv"
     path "test_negatives.csv"
+    path "test_negatives_random.csv"
+    path "sample_negatives_mqc.json", emit: mqc
 
     script:
     """
@@ -203,5 +207,42 @@ process SAMPLE_NEGATIVES {
         --train ${train_ppis} \\
         --val   ${val_ppis} \\
         --test  ${test_ppis}
+    """
+}
+
+process PREPARE_MQC {
+    input:
+    path mqc_files
+
+    output:
+    path "section_*_mqc.json"
+
+    script:
+    """
+    python3 -c "
+import json, pathlib
+sections = []
+for f in sorted(pathlib.Path('.').glob('*_mqc.json')):
+    sections.extend(json.loads(f.read_text()))
+for i, sec in enumerate(sections):
+    pathlib.Path(f'section_{i:03d}_mqc.json').write_text(json.dumps(sec, indent=2))
+"
+    """
+}
+
+process MULTIQC {
+    publishDir "${params.outdir}/multiqc", mode: 'copy'
+    tag "multiqc"
+
+    input:
+    path mqc_files
+
+    output:
+    path "multiqc_report.html"
+    path "multiqc_report_data"
+
+    script:
+    """
+    multiqc . --title "PPI Splitting Pipeline" --filename multiqc_report.html
     """
 }
