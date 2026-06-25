@@ -1,0 +1,150 @@
+#!/usr/bin/env python3
+"""
+Train a RandomForest PPI classifier with limited hyperparameter tuning.
+
+Feature construction: concatenation of the two sorted protein embeddings.
+Sorting by protein ID ensures the feature vector is the same regardless of
+the order in which the pair appears in the CSV.
+
+Hyperparameter search: 5 pre-defined configs evaluated by AUROC on val set.
+The best config is retrained on train+val, then evaluated on both test sets.
+"""
+
+import argparse
+import csv
+import sys
+
+import numpy as np
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.metrics import (
+    accuracy_score,
+    average_precision_score,
+    f1_score,
+    matthews_corrcoef,
+    precision_score,
+    recall_score,
+    roc_auc_score,
+)
+
+HP_CONFIGS = [
+    {"n_estimators": 100, "max_depth": None, "max_features": "sqrt"},
+    {"n_estimators": 200, "max_depth": None, "max_features": "sqrt"},
+    {"n_estimators": 100, "max_depth": 20,   "max_features": "sqrt"},
+    {"n_estimators": 200, "max_depth": 20,   "max_features": "log2"},
+    {"n_estimators": 300, "max_depth": None, "max_features": "log2"},
+]
+
+
+def read_labelled_csv(path):
+    pairs, labels = [], []
+    with open(path) as fh:
+        for row in csv.DictReader(fh):
+            pairs.append((row["protein1"].strip(), row["protein2"].strip()))
+            labels.append(int(row["label"]))
+    return pairs, np.array(labels)
+
+
+def build_X(pairs, labels, embeddings):
+    """Return (X, y), silently dropping pairs where either protein is missing."""
+    rows, y = [], []
+    skipped = 0
+    for (p1, p2), label in zip(pairs, labels):
+        a, b = (p1, p2) if p1 <= p2 else (p2, p1)
+        if a in embeddings and b in embeddings:
+            rows.append(np.concatenate([embeddings[a], embeddings[b]]))
+            y.append(label)
+        else:
+            skipped += 1
+    if skipped:
+        print(f"  skipped {skipped} pairs with missing embeddings", file=sys.stderr)
+    return np.array(rows), np.array(y)
+
+
+def compute_metrics(y_true, y_prob):
+    y_pred = (y_prob >= 0.5).astype(int)
+    return {
+        "auroc":     roc_auc_score(y_true, y_prob),
+        "auprc":     average_precision_score(y_true, y_prob),
+        "f1":        f1_score(y_true, y_pred, zero_division=0),
+        "mcc":       matthews_corrcoef(y_true, y_pred),
+        "precision": precision_score(y_true, y_pred, zero_division=0),
+        "recall":    recall_score(y_true, y_pred, zero_division=0),
+        "accuracy":  accuracy_score(y_true, y_pred),
+    }
+
+
+def write_mqc(results):
+    with open("classifier_metrics_mqc.tsv", "w") as fh:
+        fh.write(
+            "# id: 'classifier_metrics'\n"
+            "# section_name: 'Classifier Performance'\n"
+            "# description: 'RandomForest PPI classifier. Hyperparameters tuned on val AUROC (5 configs), then retrained on train+val. Balanced test set: 1:1 ratio. Realistic test set: 1:10 ratio, uniform random negatives.'\n"
+            "# plot_type: 'table'\n"
+            "# pconfig:\n"
+            "#     id: 'classifier_metrics_table'\n"
+            "#     title: 'RF Classifier - Test Performance'\n"
+            "Sample\tAUROC\tAUPRC\tF1\tMCC\tPrecision\tRecall\tAccuracy\n"
+        )
+        cols = ["auroc", "auprc", "f1", "mcc", "precision", "recall", "accuracy"]
+        for name, metrics in results:
+            fh.write(name + "\t" + "\t".join(f"{metrics[c]:.4f}" for c in cols) + "\n")
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--train",          required=True)
+    ap.add_argument("--val",            required=True)
+    ap.add_argument("--test_balanced",  required=True)
+    ap.add_argument("--test_realistic", required=True)
+    ap.add_argument("--embeddings",     required=True)
+    ap.add_argument("--seed",           type=int, default=42)
+    args = ap.parse_args()
+
+    print("Loading embeddings ...", file=sys.stderr)
+    raw = np.load(args.embeddings, allow_pickle=False)
+    embeddings = {k: raw[k] for k in raw.files}
+    print(f"  {len(embeddings)} proteins", file=sys.stderr)
+
+    train_pairs, y_train = read_labelled_csv(args.train)
+    val_pairs,   y_val   = read_labelled_csv(args.val)
+
+    X_train, y_train = build_X(train_pairs, y_train, embeddings)
+    X_val,   y_val   = build_X(val_pairs,   y_val,   embeddings)
+
+    # Hyperparameter search on val AUROC
+    print("Tuning hyperparameters ...", file=sys.stderr)
+    best_auroc, best_cfg = -1.0, None
+    for cfg in HP_CONFIGS:
+        clf = RandomForestClassifier(**cfg, random_state=args.seed, n_jobs=-1)
+        clf.fit(X_train, y_train)
+        auroc = roc_auc_score(y_val, clf.predict_proba(X_val)[:, 1])
+        print(f"  {cfg}  →  val AUROC {auroc:.4f}", file=sys.stderr)
+        if auroc > best_auroc:
+            best_auroc, best_cfg = auroc, cfg
+
+    print(f"Best: {best_cfg}  (val AUROC {best_auroc:.4f})", file=sys.stderr)
+
+    # Retrain on train + val combined
+    X_all     = np.concatenate([X_train, X_val])
+    y_all     = np.concatenate([y_train, y_val])
+    final_clf = RandomForestClassifier(**best_cfg, random_state=args.seed, n_jobs=-1)
+    final_clf.fit(X_all, y_all)
+
+    # Evaluate on both test sets
+    results = []
+    for name, path in [("test_balanced", args.test_balanced), ("test_realistic", args.test_realistic)]:
+        pairs, y_test_raw = read_labelled_csv(path)
+        X_test, y_test    = build_X(pairs, y_test_raw, embeddings)
+        y_prob            = final_clf.predict_proba(X_test)[:, 1]
+        metrics = compute_metrics(y_test, y_prob)
+        results.append((name, metrics))
+        print(
+            f"{name}: " + "  ".join(f"{k}={v:.4f}" for k, v in metrics.items()),
+            file=sys.stderr,
+        )
+
+    write_mqc(results)
+
+
+if __name__ == "__main__":
+    main()

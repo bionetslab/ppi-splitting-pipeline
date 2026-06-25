@@ -70,9 +70,11 @@ def write_csv(pairs, path):
         writer.writerows(pairs)
 
 
-def write_mqc(n_input, split_results):
-    n_assigned = sum(r["n_ppis"] for r in split_results)
-    n_discarded = n_input - n_assigned
+def write_mqc(n_input, n_proteins_input, split_results):
+    n_ppis_assigned     = sum(r["n_ppis"]     for r in split_results)
+    n_proteins_assigned = sum(r["n_proteins"] for r in split_results)
+    n_ppis_discarded     = n_input         - n_ppis_assigned
+    n_proteins_discarded = n_proteins_input - n_proteins_assigned
 
     with open("sort_ppis_gs_mqc.tsv", "w") as fh:
         fh.write(
@@ -84,16 +86,21 @@ def write_mqc(n_input, split_results):
             "#         description: 'Cross-partition PPIs discarded during KaHIP partitioning (total, same for all splits)'\n"
             "#         format: '{:,.0f}'\n"
             "#         scale: 'Greys'\n"
-            "Sample\tn_ppis_discarded_kahip\n"
+            "#     - n_proteins_discarded_kahip:\n"
+            "#         title: 'Proteins discarded (KaHIP)'\n"
+            "#         description: 'Proteins whose every PPI was cross-partition and thus discarded by KaHIP (total, same for all splits)'\n"
+            "#         format: '{:,.0f}'\n"
+            "#         scale: 'Greys'\n"
+            "Sample\tn_ppis_discarded_kahip\tn_proteins_discarded_kahip\n"
         )
         for r in split_results:
-            fh.write(f"{r['name']}\t{n_discarded}\n")
+            fh.write(f"{r['name']}\t{n_ppis_discarded}\t{n_proteins_discarded}\n")
 
     with open("sort_ppis_bar_mqc.tsv", "w") as fh:
         fh.write(
             "# id: 'split_bar'\n"
             "# section_name: 'PPI Partitioning'\n"
-            f"# description: 'Of {n_input:,} input PPIs, {n_assigned:,} were assigned to a split and {n_discarded:,} were discarded because their two proteins landed in different KaHIP partitions.'\n"
+            f"# description: 'Of {n_input:,} input PPIs ({n_proteins_input:,} proteins), {n_ppis_assigned:,} PPIs ({n_proteins_assigned:,} proteins) were assigned to a split and {n_ppis_discarded:,} PPIs ({n_proteins_discarded:,} proteins) were discarded because their interactions were cross-partition.'\n"
             "# plot_type: 'bargraph'\n"
             "# pconfig:\n"
             "#     id: 'split_bar_plot'\n"
@@ -103,7 +110,7 @@ def write_mqc(n_input, split_results):
         )
         for r in split_results:
             fh.write(f"{r['name']}\t{r['n_ppis']}\n")
-        fh.write(f"discarded\t{n_discarded}\n")
+        fh.write(f"discarded\t{n_ppis_discarded}\n")
 
 
 def write_fasta(seqs, proteins, path):
@@ -132,6 +139,7 @@ def main():
     }
 
     ppis = read_ppis(args.ppis)
+    all_proteins = {p for p1, p2 in ppis for p in (p1, p2)}
     seqs = read_fasta(args.fasta)
 
     # Bucket intra-partition PPIs
@@ -162,7 +170,7 @@ def main():
         print(f"{name}: {len(pairs)} PPIs, {len(proteins)} proteins", file=sys.stderr)
         split_results.append({"name": name, "n_ppis": len(pairs), "n_proteins": len(proteins)})
 
-    write_mqc(len(ppis), split_results)
+    write_mqc(len(ppis), len(all_proteins), split_results)
 
 
 if __name__ == "__main__":

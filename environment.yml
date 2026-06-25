@@ -10,3 +10,9 @@ dependencies:
   - cd-hit
   - kahip
   - multiqc
+  - scikit-learn
+  - numpy
+  - pip:
+    - torch
+    - transformers
+    - sentencepiece

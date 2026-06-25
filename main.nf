@@ -9,6 +9,8 @@ params.kahip_k                = 3
 params.kahip_preconfiguration = "strong"
 params.cdhit_identity         = 0.4
 params.cdhit_wordsize         = 2
+params.embedding_model        = "esm2"  // "none" (one-hot), "esm2", "prot_t5", or path to pre-computed .npz
+params.seed                   = 42
 
 include {
     FETCH_SEQUENCES
@@ -21,6 +23,8 @@ include {
     CDHIT as CDHIT_TRAIN_TEST
     REMOVE_REDUNDANT
     SAMPLE_NEGATIVES
+    EMBED_SEQUENCES
+    TRAIN_CLASSIFIER
     MULTIQC
 } from './modules/processes'
 
@@ -54,11 +58,20 @@ workflow {
         sim_tt
     )
 
-    SAMPLE_NEGATIVES(nr.train_ppis, nr.val_ppis, nr.test_ppis)
+    neg = SAMPLE_NEGATIVES(nr.train_ppis, nr.val_ppis, nr.test_ppis)
+
+    if (params.embedding_model in ["none", "esm2", "prot_t5"]) {
+        embeddings = EMBED_SEQUENCES(nr.train_fasta, nr.val_fasta, nr.test_fasta)
+    } else {
+        embeddings = Channel.value(file(params.embedding_model, checkIfExists: true))
+    }
+
+    clf = TRAIN_CLASSIFIER(neg.train, neg.val, neg.test_balanced, neg.test_realistic, embeddings)
 
     mqc_files = sorted.mqc
         .mix(nr.mqc)
-        .mix(SAMPLE_NEGATIVES.out.mqc)
+        .mix(neg.mqc)
+        .mix(clf.mqc)
         .collect()
 
     MULTIQC(mqc_files)
