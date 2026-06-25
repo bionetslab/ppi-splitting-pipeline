@@ -115,7 +115,7 @@ process SORT_PPIS {
     path "train.fasta",        emit: train_fasta
     path "val.fasta",          emit: val_fasta
     path "test.fasta",         emit: test_fasta
-    path "sort_ppis_mqc.json", emit: mqc
+    path "*_mqc.tsv",          emit: mqc
 
     script:
     """
@@ -149,7 +149,6 @@ process CDHIT {
 }
 
 process REMOVE_REDUNDANT {
-    publishDir "${params.outdir}", mode: 'copy'
     tag "remove_redundant"
 
     input:
@@ -169,7 +168,7 @@ process REMOVE_REDUNDANT {
     path "train_nr.fasta",            emit: train_fasta
     path "val_nr.fasta",              emit: val_fasta
     path "test_nr.fasta",             emit: test_fasta
-    path "remove_redundant_mqc.json", emit: mqc
+    path "*_mqc.tsv",                 emit: mqc
 
     script:
     """
@@ -186,7 +185,7 @@ process REMOVE_REDUNDANT {
 }
 
 process SAMPLE_NEGATIVES {
-    publishDir "${params.outdir}", mode: 'copy'
+    publishDir "${params.outdir}", mode: 'copy', saveAs: { f -> f.endsWith('_mqc.tsv') ? null : f }
     tag "negatives"
 
     input:
@@ -195,11 +194,11 @@ process SAMPLE_NEGATIVES {
     path test_ppis
 
     output:
-    path "train_negatives.csv"
-    path "val_negatives.csv"
-    path "test_negatives.csv"
-    path "test_negatives_random.csv"
-    path "sample_negatives_mqc.json", emit: mqc
+    path "train.csv"
+    path "val.csv"
+    path "test_balanced.csv"
+    path "test_realistic.csv"
+    path "*_mqc.tsv",                 emit: mqc
 
     script:
     """
@@ -207,26 +206,6 @@ process SAMPLE_NEGATIVES {
         --train ${train_ppis} \\
         --val   ${val_ppis} \\
         --test  ${test_ppis}
-    """
-}
-
-process PREPARE_MQC {
-    input:
-    path mqc_files
-
-    output:
-    path "section_*_mqc.json"
-
-    script:
-    """
-    python3 -c "
-import json, pathlib
-sections = []
-for f in sorted(pathlib.Path('.').glob('*_mqc.json')):
-    sections.extend(json.loads(f.read_text()))
-for i, sec in enumerate(sections):
-    pathlib.Path(f'section_{i:03d}_mqc.json').write_text(json.dumps(sec, indent=2))
-"
     """
 }
 

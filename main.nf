@@ -21,7 +21,6 @@ include {
     CDHIT as CDHIT_TRAIN_TEST
     REMOVE_REDUNDANT
     SAMPLE_NEGATIVES
-    PREPARE_MQC
     MULTIQC
 } from './modules/processes'
 
@@ -62,5 +61,5 @@ workflow {
         .mix(SAMPLE_NEGATIVES.out.mqc)
         .collect()
 
-    MULTIQC(PREPARE_MQC(mqc_files))
+    MULTIQC(mqc_files)
 }

@@ -10,7 +10,6 @@ Rules:
 
 import argparse
 import csv
-import json
 import sys
 from collections import defaultdict
 
@@ -75,37 +74,36 @@ def write_mqc(n_input, split_results):
     n_assigned = sum(r["n_ppis"] for r in split_results)
     n_discarded = n_input - n_assigned
 
-    bar_data = {r["name"]: {"PPIs": r["n_ppis"]} for r in split_results}
-    bar_data["discarded"] = {"PPIs": n_discarded}
+    with open("sort_ppis_gs_mqc.tsv", "w") as fh:
+        fh.write(
+            "# id: 'split_generalstats'\n"
+            "# plot_type: 'generalstats'\n"
+            "# pconfig:\n"
+            "#     - n_ppis_discarded_kahip:\n"
+            "#         title: 'PPIs discarded (KaHIP)'\n"
+            "#         description: 'Cross-partition PPIs discarded during KaHIP partitioning (total, same for all splits)'\n"
+            "#         format: '{:,.0f}'\n"
+            "#         scale: 'Greys'\n"
+            "Sample\tn_ppis_discarded_kahip\n"
+        )
+        for r in split_results:
+            fh.write(f"{r['name']}\t{n_discarded}\n")
 
-    sections = [
-        {
-            "id": "split_generalstats",
-            "plot_type": "generalstats",
-            "pconfig": [
-                {"n_ppis_discarded_kahip": {"title": "PPIs discarded (KaHIP)", "description": "Cross-partition PPIs discarded during KaHIP partitioning (total, same for all splits)", "format": "{:,.0f}", "scale": "Greys"}},
-            ],
-            "data": {r["name"]: {"n_ppis_discarded_kahip": n_discarded} for r in split_results},
-        },
-        {
-            "id": "split_bar",
-            "section_name": "PPI Partitioning",
-            "description": (
-                f"Of {n_input:,} input PPIs, {n_assigned:,} were assigned to a split "
-                f"and {n_discarded:,} were discarded because their two proteins landed "
-                "in different KaHIP partitions."
-            ),
-            "plot_type": "bargraph",
-            "pconfig": {
-                "id": "split_bar_plot",
-                "title": "PPI Partitioning: edges per split",
-                "ylab": "# PPIs",
-            },
-            "data": bar_data,
-        },
-    ]
-    with open("sort_ppis_mqc.json", "w") as fh:
-        json.dump(sections, fh, indent=2)
+    with open("sort_ppis_bar_mqc.tsv", "w") as fh:
+        fh.write(
+            "# id: 'split_bar'\n"
+            "# section_name: 'PPI Partitioning'\n"
+            f"# description: 'Of {n_input:,} input PPIs, {n_assigned:,} were assigned to a split and {n_discarded:,} were discarded because their two proteins landed in different KaHIP partitions.'\n"
+            "# plot_type: 'bargraph'\n"
+            "# pconfig:\n"
+            "#     id: 'split_bar_plot'\n"
+            "#     title: 'PPI Partitioning: edges per split'\n"
+            "#     ylab: '# PPIs'\n"
+            "Sample\tPPIs\n"
+        )
+        for r in split_results:
+            fh.write(f"{r['name']}\t{r['n_ppis']}\n")
+        fh.write(f"discarded\t{n_discarded}\n")
 
 
 def write_fasta(seqs, proteins, path):

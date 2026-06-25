@@ -16,7 +16,6 @@ PPIs are filtered so both partners must still be present.
 
 import argparse
 import csv
-import json
 import sys
 
 
@@ -70,54 +69,51 @@ def write_csv(pairs, path):
 
 
 def write_mqc(split_results):
-    gs_data = {
-        r["name"]: {
-            "n_ppis_pos": r["n_ppis_nr"],
-            "n_proteins": r["n_proteins_nr"],
-            "n_ppis_removed": r["n_ppis_removed"],
-            "n_proteins_removed": r["n_proteins_removed"],
-        }
-        for r in split_results
-    }
-    sim_bar_data = {
-        r["name"]: {
-            "Kept (dissimilar to train)": r["n_proteins_nr"],
-            "Removed (similar to train)": r["n_proteins_removed"],
-        }
-        for r in split_results
-        if r["name"] != "train"
-    }
+    with open("remove_redundant_gs_mqc.tsv", "w") as fh:
+        fh.write(
+            "# id: 'nr_generalstats'\n"
+            "# plot_type: 'generalstats'\n"
+            "# pconfig:\n"
+            "#     - n_ppis_pos:\n"
+            "#         title: 'PPIs (pos)'\n"
+            "#         description: 'Positive PPIs in the split after redundancy removal'\n"
+            "#         format: '{:,.0f}'\n"
+            "#         scale: 'Blues'\n"
+            "#     - n_proteins:\n"
+            "#         title: 'Proteins'\n"
+            "#         description: 'Unique proteins in the split after redundancy removal'\n"
+            "#         format: '{:,.0f}'\n"
+            "#         scale: 'Greens'\n"
+            "#     - n_ppis_removed:\n"
+            "#         title: 'PPIs removed'\n"
+            "#         description: 'PPIs removed because a partner protein was similar to a training protein'\n"
+            "#         format: '{:,.0f}'\n"
+            "#         scale: 'Reds'\n"
+            "#     - n_proteins_removed:\n"
+            "#         title: 'Proteins removed'\n"
+            "#         description: 'Proteins removed due to sequence similarity with the training set (CD-HIT-2D)'\n"
+            "#         format: '{:,.0f}'\n"
+            "#         scale: 'Oranges'\n"
+            "Sample\tn_ppis_pos\tn_proteins\tn_ppis_removed\tn_proteins_removed\n"
+        )
+        for r in split_results:
+            fh.write(f"{r['name']}\t{r['n_ppis_nr']}\t{r['n_proteins_nr']}\t{r['n_ppis_removed']}\t{r['n_proteins_removed']}\n")
 
-    sections = [
-        {
-            "id": "nr_generalstats",
-            "plot_type": "generalstats",
-            "pconfig": [
-                {"n_ppis_pos": {"title": "PPIs (pos)", "description": "Positive PPIs in the split after redundancy removal", "format": "{:,.0f}", "scale": "Blues"}},
-                {"n_proteins": {"title": "Proteins", "description": "Unique proteins in the split after redundancy removal", "format": "{:,.0f}", "scale": "Greens"}},
-                {"n_ppis_removed": {"title": "PPIs removed", "description": "PPIs removed because a partner protein was similar to a training protein", "format": "{:,.0f}", "scale": "Reds"}},
-                {"n_proteins_removed": {"title": "Proteins removed", "description": "Proteins removed due to sequence similarity with the training set (CD-HIT-2D)", "format": "{:,.0f}", "scale": "Oranges"}},
-            ],
-            "data": gs_data,
-        },
-        {
-            "id": "similarity_bar",
-            "section_name": "Sequence Similarity Filtering",
-            "description": (
-                "Val and test proteins removed because they share ≥40% sequence identity "
-                "with a training protein (CD-HIT-2D). Training proteins are never removed."
-            ),
-            "plot_type": "bargraph",
-            "pconfig": {
-                "id": "similarity_bar_plot",
-                "title": "Similarity to Training Set: val and test proteins",
-                "ylab": "# Proteins",
-            },
-            "data": sim_bar_data,
-        },
-    ]
-    with open("remove_redundant_mqc.json", "w") as fh:
-        json.dump(sections, fh, indent=2)
+    with open("remove_redundant_bar_mqc.tsv", "w") as fh:
+        fh.write(
+            "# id: 'similarity_bar'\n"
+            "# section_name: 'Sequence Similarity Filtering'\n"
+            "# description: 'Val and test proteins removed because they share ≥40% sequence identity with a training protein (CD-HIT-2D). Training proteins are never removed.'\n"
+            "# plot_type: 'bargraph'\n"
+            "# pconfig:\n"
+            "#     id: 'similarity_bar_plot'\n"
+            "#     title: 'Similarity to Training Set: val and test proteins'\n"
+            "#     ylab: '# Proteins'\n"
+            "Sample\tKept (dissimilar to train)\tRemoved (similar to train)\n"
+        )
+        for r in split_results:
+            if r["name"] != "train":
+                fh.write(f"{r['name']}\t{r['n_proteins_nr']}\t{r['n_proteins_removed']}\n")
 
 
 def write_fasta(seqs, proteins, path):
