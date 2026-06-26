@@ -1,4 +1,4 @@
-process FETCH_SEQUENCES {
+process FETCH_DATA {
     publishDir "${params.outdir}/data", mode: 'copy'
     tag "fetch"
 
@@ -6,11 +6,12 @@ process FETCH_SEQUENCES {
     path ppis
 
     output:
-    path "sequences.fasta"
+    path "sequences.fasta",    emit: sequences
+    path "go_annotations.tsv", emit: go_annotations
 
     script:
     """
-    fetch_sequences.py ${ppis} sequences.fasta
+    fetch_data.py ${ppis} sequences.fasta go_annotations.tsv
     """
 }
 
@@ -48,7 +49,7 @@ process RUN_BLAST {
     blastp \\
         -query ${fasta} \\
         -db blastdb \\
-        -outfmt "6 qseqid sseqid evalue bitscore" \\
+        -outfmt "6 qseqid sseqid evalue bitscore pident" \\
         -max_hsps 1 \\
         -num_threads ${task.cpus} \\
         -out all_vs_all.tsv
@@ -251,6 +252,35 @@ process TRAIN_CLASSIFIER {
         --test_realistic ${test_realistic_csv} \\
         --embeddings     ${embeddings} \\
         --seed           ${params.seed}
+    """
+}
+
+process BIAS_ANALYSIS {
+    tag "bias"
+
+    input:
+    path train_csv
+    path val_csv
+    path test_balanced_csv
+    path test_realistic_csv
+    path blast_tsv
+    path embeddings
+    path go_annotations
+
+    output:
+    path "*_mqc.*", emit: mqc
+
+    script:
+    """
+    bias_analysis.py \\
+        --train           ${train_csv} \\
+        --val             ${val_csv} \\
+        --test_balanced   ${test_balanced_csv} \\
+        --test_realistic  ${test_realistic_csv} \\
+        --blast           ${blast_tsv} \\
+        --embeddings      ${embeddings} \\
+        --go_annotations  ${go_annotations} \\
+        --seed            ${params.seed}
     """
 }
 

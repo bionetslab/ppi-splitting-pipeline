@@ -13,7 +13,7 @@ params.embedding_model        = "esm2"  // "none" (one-hot), "esm2", "prot_t5", 
 params.seed                   = 42
 
 include {
-    FETCH_SEQUENCES
+    FETCH_DATA
     GET_LENGTHS
     RUN_BLAST
     MAKE_METIS
@@ -25,22 +25,23 @@ include {
     SAMPLE_NEGATIVES
     EMBED_SEQUENCES
     TRAIN_CLASSIFIER
+    BIAS_ANALYSIS
     MULTIQC
 } from './modules/processes'
 
 workflow {
     ppis_ch = Channel.value(file(params.ppis, checkIfExists: true))
 
-    sequences = FETCH_SEQUENCES(ppis_ch)
-    lengths   = GET_LENGTHS(sequences)
-    blast_out = RUN_BLAST(sequences)
+    fetched        = FETCH_DATA(ppis_ch)
+    lengths        = GET_LENGTHS(fetched.sequences)
+    blast_out = RUN_BLAST(fetched.sequences)
     metis_out = MAKE_METIS(blast_out, lengths)
     partition = RUN_KAHIP(metis_out.graph)
 
     sorted = SORT_PPIS(
         ppis_ch,
         partition,
-        sequences,
+        fetched.sequences,
         metis_out.node_mapping
     )
 
@@ -66,12 +67,14 @@ workflow {
         embeddings = Channel.value(file(params.embedding_model, checkIfExists: true))
     }
 
-    clf = TRAIN_CLASSIFIER(neg.train, neg.val, neg.test_balanced, neg.test_realistic, embeddings)
+    clf  = TRAIN_CLASSIFIER(neg.train, neg.val, neg.test_balanced, neg.test_realistic, embeddings)
+    bias = BIAS_ANALYSIS(neg.train, neg.val, neg.test_balanced, neg.test_realistic, blast_out, embeddings, fetched.go_annotations)
 
     mqc_files = sorted.mqc
         .mix(nr.mqc)
         .mix(neg.mqc)
         .mix(clf.mqc)
+        .mix(bias.mqc)
         .collect()
 
     MULTIQC(mqc_files)

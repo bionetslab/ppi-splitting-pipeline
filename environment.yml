@@ -12,6 +12,8 @@ dependencies:
   - multiqc
   - scikit-learn
   - numpy
+  - matplotlib
+  - plotly
   - pip:
     - torch
     - transformers
