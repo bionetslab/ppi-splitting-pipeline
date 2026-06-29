@@ -54,6 +54,9 @@ def build_bitscore_matrix(blast_path, protein_ids):
 def cluster_order(mat):
     """Return leaf ordering from average-linkage clustering on bitscore profiles."""
     Z = linkage(pdist(mat, metric="euclidean"), method="average", optimal_ordering=True)
+    # scipy's dendrogram is recursive; with n leaves the stack can reach ~n frames.
+    needed = max(sys.getrecursionlimit(), len(mat) * 10)
+    sys.setrecursionlimit(needed)
     return dendrogram(Z, no_plot=True)["leaves"]
 
 
