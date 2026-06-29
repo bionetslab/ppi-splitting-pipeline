@@ -1,35 +1,31 @@
 #!/usr/bin/env python3
 """
-Bias analysis: utility and detectability for PPI dataset attributes.
+Bias analysis: utility and detectability for one PPI dataset attribute.
+
+Run once per attribute (--attribute flag); Nextflow calls this in parallel for
+all six attributes.
 
 Attributes
 ----------
-sequence_similarity      – BLAST pident between the two proteins in the pair,
-                           normalised to [0, 1]
-embedding_similarity     – cosine similarity between the two individual protein
-                           embeddings in the pair
-functional_relatedness_BP/MF/CC – Jaccard similarity of GO Biological Process,
-                                  Molecular Function, and Cellular Component term
-                                  sets between the two proteins in a pair
+sequence_similarity           – BLAST pident between the pair, normalised to [0,1]
+embedding_similarity          – cosine similarity of the two protein embeddings
+functional_relatedness_BP/MF/CC – Jaccard similarity of GO term sets
+self_interactions             – 1 if both proteins are identical, 0 otherwise
 
-Utility       = MI(A; Y) via sklearn kNN estimator (continuous A)
-Detectability = Spearman ρ of Random Forest Regressor predicting A
-                from the pair embedding X
+Utility       = MI(A; Y) via sklearn kNN estimator
+Detectability = Spearman ρ of a Ridge regressor predicting A from pair embedding X
 
-Outputs
--------
-bias_table_{split}_mqc.tsv    – MultiQC table per split (MI, relationship flag, detectability)
-bias_scatter_{split}_mqc.json – MultiQC scatter per split (x = detectability, y = utility)
+Output
+------
+{attribute}_bias_mqc.tsv  – MultiQC table with splits as rows
 """
 
 import argparse
 import csv
-import json
 import sys
 from collections import defaultdict
 
 import numpy as np
-import plotly.graph_objects as go
 from scipy.stats import spearmanr
 from sklearn.linear_model import Ridge
 from sklearn.feature_selection import mutual_info_classif
@@ -143,11 +139,6 @@ def func_relatedness(pairs, go_anns, category):
     return np.array(sims, dtype=np.float32)
 
 
-# ColorBrewer Set2 qualitative palette (8 colours)
-_SET2 = ["#66C2A5", "#FC8D62", "#8DA0CB", "#E78AC3",
-         "#A6D854", "#FFD92F", "#E5C494", "#B3B3B3"]
-
-
 def analyse(A, X, y, name, seed=42):
     """Return dict with mi, related, detectability (train-set Spearman ρ)."""
     discrete_features = name == "self_interactions"
@@ -166,157 +157,62 @@ def analyse(A, X, y, name, seed=42):
     return {"mi": mi, "related": mi > 0, "detectability": detectability}
 
 
-def _write_tables_mqc(all_results):
-    """MultiQC JSON table with one dataset tab per split.
-
-    Passing data as a list + data_labels in pconfig makes MultiQC render
-    dataset-switch tabs, the same mechanism used for bar/line plots.
-    The native table engine keeps sorting and per-column colour scales.
-    """
-    splits = list(all_results.keys())
-
-    data_list = [
-        {name: {"MI(A;Y)": r["mi"],
-                "Related?": "Yes" if r["related"] else "No",
-                "Detectability (Spearman ρ)": r["detectability"]}
-         for name, r in all_results[split]}
-        for split in splits
-    ]
-
-    doc = {
-        "id": "bias_tables",
-        "section_name": "Bias Analysis Tables",
-        "description": "Utility MI(A;Y) and detectability (5-fold RF Spearman ρ) per split.",
-        "plot_type": "table",
-        "pconfig": {
-            "id": "bias_tables_plot",
-            "title": "Attribute Utility and Detectability",
-            "data_labels": [{"name": s} for s in splits],
-        },
-        "headers": {
-            "MI(A;Y)": {"title": "MI(A;Y)", "format": "{:.4f}", "scale": "Greens"},
-            "Related?": {"title": "Related?", "scale": False},
-            "Detectability (Spearman ρ)": {
-                "title": "Detectability (Spearman ρ)",
-                "format": "{:.4f}",
-                "scale": "Blues",
-            },
-        },
-        "data": data_list,
-    }
-
-    with open("bias_tables_mqc.json", "w") as fh:
-        json.dump(doc, fh, indent=2)
-
-
-_SPLIT_SYMBOLS = {
-    "train":          "circle",
-    "val":            "square",
-    "test_balanced":  "diamond",
-    "test_realistic": "triangle-up",
+ATTRIBUTES = {
+    "sequence_similarity":       lambda pairs, blast_sim, emb, go: seq_sim_within_pair(pairs, blast_sim),
+    "embedding_similarity":      lambda pairs, blast_sim, emb, go: emb_sim_within_pair(pairs, emb),
+    "functional_relatedness_BP": lambda pairs, blast_sim, emb, go: func_relatedness(pairs, go, "BP"),
+    "functional_relatedness_MF": lambda pairs, blast_sim, emb, go: func_relatedness(pairs, go, "MF"),
+    "functional_relatedness_CC": lambda pairs, blast_sim, emb, go: func_relatedness(pairs, go, "CC"),
+    "self_interactions":         lambda pairs, blast_sim, emb, go: self_interactions(pairs),
 }
 
 
-def _write_scatter_mqc(all_results):
-    """Interactive Plotly scatter: colour = attribute, marker shape = split.
-
-    One trace per attribute with one point per split; marker.symbol is a list
-    so each point gets the correct split shape.  Standard Plotly legend
-    behaviour (click to hide, double-click to isolate) works on attributes.
-    Split dummy traces provide a shape key but are purely informational.
-    """
-    first = next(iter(all_results.values()))
-    attr_names = [name for name, _ in first]
-    splits = list(all_results.keys())
-    color_map = {name: _SET2[i % len(_SET2)] for i, name in enumerate(attr_names)}
-
-    fig = go.Figure()
-
-    for attr in attr_names:
-        xs, ys, symbols, hover_splits = [], [], [], []
-        for split in splits:
-            r = dict(all_results[split])[attr]
-            xs.append(r["detectability"])
-            ys.append(r["mi"])
-            symbols.append(_SPLIT_SYMBOLS[split])
-            hover_splits.append(split)
-        fig.add_trace(go.Scatter(
-            x=xs, y=ys,
-            mode="markers",
-            name=attr,
-            customdata=hover_splits,
-            marker=dict(
-                color=color_map[attr],
-                symbol=symbols,
-                size=10,
-                line=dict(color="white", width=1),
-            ),
-            hovertemplate=(
-                f"<b>{attr}</b><br>"
-                "Split: %{customdata}<br>"
-                "Detectability: %{x:.3f}<br>"
-                "MI: %{y:.4f}<extra></extra>"
-            ),
-        ))
-
-    # Informational split shape key (dummies; clicking only hides the key marker).
-    for j, (split, symbol) in enumerate(_SPLIT_SYMBOLS.items()):
-        fig.add_trace(go.Scatter(
-            x=[None], y=[None],
-            mode="markers",
-            name=split,
-            legendgroup="_splits",
-            legendgrouptitle=dict(text="Split") if j == 0 else None,
-            showlegend=True,
-            marker=dict(color="gray", symbol=symbol, size=10),
-        ))
-
-    fig.update_layout(
-        xaxis_title="Detectability (RF Spearman ρ)",
-        yaxis_title="Utility MI(A;Y)",
-        legend=dict(title=dict(text="Attribute"), groupclick="toggleitem"),
-        margin=dict(l=60, r=20, t=30, b=50),
-        height=420,
-        autosize=True,
-    )
-
-    div = fig.to_html(full_html=False, include_plotlyjs="cdn", config={"responsive": True})
-
-    with open("bias_scatter_mqc.html", "w") as fh:
+def write_mqc(attribute, results):
+    fname = f"{attribute}_bias_mqc.tsv"
+    with open(fname, "w") as fh:
         fh.write(
-            "<!--\n"
-            "id: 'bias_scatter'\n"
-            "section_name: 'Bias Analysis – Utility vs. Detectability'\n"
-            "description: 'Colour = attribute (click/double-click to filter), "
-            "shape = split. "
-            "x = detectability (RF Spearman ρ), y = utility MI(A;Y).'\n"
-            "-->\n"
+            f"# id: 'bias_{attribute}'\n"
+            f"# section_name: 'Bias: {attribute}'\n"
+            f"# description: 'Utility MI(A;Y) and detectability (Ridge Spearman ρ) for {attribute}.'\n"
+            "# plot_type: 'table'\n"
+            "# pconfig:\n"
+            f"#     id: 'bias_{attribute}_table'\n"
+            f"#     title: 'Bias: {attribute}'\n"
+            "Split\tMI(A;Y)\tRelated?\tDetectability (Spearman ρ)\n"
         )
-        fh.write(div)
-
-
-def write_mqc(all_results):
-    _write_tables_mqc(all_results)
-    _write_scatter_mqc(all_results)
+        for split, r in results:
+            fh.write(f"{split}\t{r['mi']:.4f}\t{'Yes' if r['related'] else 'No'}\t{r['detectability']:.4f}\n")
 
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--train",           required=True, help="train.csv with labels")
-    ap.add_argument("--val",             required=True, help="val.csv with labels")
-    ap.add_argument("--test_balanced",   required=True, help="test_balanced.csv with labels")
-    ap.add_argument("--test_realistic",  required=True, help="test_realistic.csv with labels")
-    ap.add_argument("--blast",           required=True, help="all_vs_all.tsv with pident at col 4")
-    ap.add_argument("--embeddings",     required=True, help="embeddings.npz")
-    ap.add_argument("--go_annotations", required=True, help="go_annotations.tsv with GO term sets")
-    ap.add_argument("--seed",           type=int, default=42)
+    ap.add_argument("--attribute",      required=True, choices=list(ATTRIBUTES),
+                    help="which attribute to analyse")
+    ap.add_argument("--train",           required=True)
+    ap.add_argument("--val",             required=True)
+    ap.add_argument("--test_balanced",   required=True)
+    ap.add_argument("--test_realistic",  required=True)
+    ap.add_argument("--blast",           required=True)
+    ap.add_argument("--embeddings",      required=True)
+    ap.add_argument("--go_annotations",  required=True)
+    ap.add_argument("--seed",            type=int, default=42)
     args = ap.parse_args()
+
+    print(f"=== {args.attribute} ===", file=sys.stderr)
 
     print("Loading embeddings ...", file=sys.stderr)
     embeddings = load_embeddings(args.embeddings)
-    print("Parsing BLAST similarities ...", file=sys.stderr)
-    blast_sim = parse_blast_pident(args.blast)
-    go_anns = load_go_annotations(args.go_annotations)
+
+    blast_sim = None
+    if args.attribute == "sequence_similarity":
+        print("Parsing BLAST similarities ...", file=sys.stderr)
+        blast_sim = parse_blast_pident(args.blast)
+
+    go_anns = None
+    if args.attribute.startswith("functional_relatedness"):
+        go_anns = load_go_annotations(args.go_annotations)
+
+    compute = ATTRIBUTES[args.attribute]
 
     split_paths = [
         ("train",          args.train),
@@ -325,30 +221,17 @@ def main():
         ("test_realistic", args.test_realistic),
     ]
 
-    all_results = {}
+    results = []
     for split, path in split_paths:
         pairs, y = read_labelled_csv(path)
         X, pairs_f, y_f = _prepare_split(pairs, y, embeddings)
-        print(f"  {X.shape[0]} {split} pairs retained for analysis", file=sys.stderr)
+        print(f"  {X.shape[0]} {split} pairs retained", file=sys.stderr)
+        A = compute(pairs_f, blast_sim, embeddings, go_anns)
+        r = analyse(A, X, y_f, args.attribute, seed=args.seed)
+        results.append((split, r))
+        print(f"  [{split}] MI={r['mi']:.4f}  ρ={r['detectability']:.4f}", file=sys.stderr)
 
-        attrs = [
-            ("sequence_similarity",        seq_sim_within_pair(pairs_f, blast_sim)),
-            ("embedding_similarity",       emb_sim_within_pair(pairs_f, embeddings)),
-            ("functional_relatedness_BP",  func_relatedness(pairs_f, go_anns, "BP")),
-            ("functional_relatedness_MF",  func_relatedness(pairs_f, go_anns, "MF")),
-            ("functional_relatedness_CC",  func_relatedness(pairs_f, go_anns, "CC")),
-            ("self_interactions",          self_interactions(pairs_f)),
-        ]
-
-        results = []
-        for name, A in attrs:
-            print(f"  Analyzing {name} ...", file=sys.stderr)
-            r = analyse(A, X, y_f, name, seed=args.seed)
-            results.append((name, r))
-            print(f"  [{split}] {name}: MI={r['mi']:.4f}  related={r['related']}  ρ={r['detectability']:.4f}", file=sys.stderr)
-        all_results[split] = results
-
-    write_mqc(all_results)
+    write_mqc(args.attribute, results)
 
 
 if __name__ == "__main__":

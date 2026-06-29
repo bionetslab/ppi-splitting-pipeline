@@ -256,9 +256,10 @@ process TRAIN_CLASSIFIER {
 }
 
 process BIAS_ANALYSIS {
-    tag "bias"
+    tag "${attribute}"
 
     input:
+    each attribute
     path train_csv
     path val_csv
     path test_balanced_csv
@@ -268,11 +269,12 @@ process BIAS_ANALYSIS {
     path go_annotations
 
     output:
-    path "*_mqc.*", emit: mqc
+    path "*_bias_mqc.tsv", emit: mqc
 
     script:
     """
     bias_analysis.py \\
+        --attribute       ${attribute} \\
         --train           ${train_csv} \\
         --val             ${val_csv} \\
         --test_balanced   ${test_balanced_csv} \\
@@ -281,6 +283,21 @@ process BIAS_ANALYSIS {
         --embeddings      ${embeddings} \\
         --go_annotations  ${go_annotations} \\
         --seed            ${params.seed}
+    """
+}
+
+process COLLECT_BIAS {
+    tag "bias_scatter"
+
+    input:
+    path tsvs
+
+    output:
+    path "bias_scatter_mqc.html", emit: mqc
+
+    script:
+    """
+    collect_bias.py ${tsvs}
     """
 }
 

@@ -26,6 +26,7 @@ include {
     EMBED_SEQUENCES
     TRAIN_CLASSIFIER
     BIAS_ANALYSIS
+    COLLECT_BIAS
     SIMILARITY_HEATMAP
     MULTIQC
 } from './modules/processes'
@@ -69,7 +70,26 @@ workflow {
     }
 
     clf      = TRAIN_CLASSIFIER(neg.train, neg.val, neg.test_balanced, neg.test_realistic, embeddings)
-    bias     = BIAS_ANALYSIS(neg.train, neg.val, neg.test_balanced, neg.test_realistic, blast_out, embeddings, fetched.go_annotations)
+
+    bias_attributes = [
+        "sequence_similarity",
+        "embedding_similarity",
+        "functional_relatedness_BP",
+        "functional_relatedness_MF",
+        "functional_relatedness_CC",
+        "self_interactions",
+    ]
+    bias = BIAS_ANALYSIS(
+        bias_attributes,
+        neg.train.first(),
+        neg.val.first(),
+        neg.test_balanced.first(),
+        neg.test_realistic.first(),
+        blast_out.first(),
+        embeddings.first(),
+        fetched.go_annotations.first()
+    )
+    scatter  = COLLECT_BIAS(bias.mqc.collect())
     heatmap  = SIMILARITY_HEATMAP(nr.train_fasta, nr.val_fasta, nr.test_fasta, blast_out)
 
     mqc_files = sorted.mqc
@@ -77,6 +97,7 @@ workflow {
         .mix(neg.mqc)
         .mix(clf.mqc)
         .mix(bias.mqc)
+        .mix(scatter.mqc)
         .mix(heatmap)
         .collect()
 
