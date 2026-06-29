@@ -89,7 +89,7 @@ def main():
                 f"<b>{attr}</b><br>"
                 "Split: %{customdata}<br>"
                 "Detectability: %{x:.3f}<br>"
-                "MI: %{y:.4f}<extra></extra>"
+                "NMI: %{y:.4f}<extra></extra>"
             ),
         ))
 
@@ -106,7 +106,7 @@ def main():
 
     fig.update_layout(
         xaxis_title="Detectability (Ridge Spearman ρ)",
-        yaxis_title="Utility MI(A;Y)",
+        yaxis_title="Utility NMI(A;Y)",
         legend=dict(title=dict(text="Attribute"), groupclick="toggleitem"),
         margin=dict(l=60, r=20, t=30, b=50),
         height=420,
@@ -121,7 +121,7 @@ def main():
             "id: 'bias_scatter'\n"
             "section_name: 'Bias Analysis – Utility vs. Detectability'\n"
             "description: 'Colour = attribute (click/double-click to filter), "
-            "shape = split. x = detectability (Ridge Spearman ρ), y = utility MI(A;Y).'\n"
+            "shape = split. x = detectability (Ridge Spearman ρ), y = utility NMI(A;Y) = MI/sqrt(H(A)·H(Y)).'\n"
             "-->\n"
         )
         fh.write(div)

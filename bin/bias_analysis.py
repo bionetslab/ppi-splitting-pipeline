@@ -139,13 +139,37 @@ def func_relatedness(pairs, go_anns, category):
     return np.array(sims, dtype=np.float32)
 
 
-def analyse(A, X, y, name, seed=42):
-    """Return dict with mi, related, detectability (train-set Spearman ρ)."""
+def _entropy(counts):
+    """Shannon entropy in nats; ignores zero-count bins."""
+    c = counts[counts > 0].astype(float)
+    p = c / c.sum()
+    return float(-np.sum(p * np.log(p)))
+
+
+def analyse(A, X, y, name, seed=42, n_bins=10):
+    """Return dict with nmi, related, detectability (train-set Spearman ρ).
+
+    NMI = MI(A; Y) / sqrt(H(A) · H(Y)) — symmetric, bounded in [0, 1].
+    H(A) is estimated by binning A into n_bins equal-width histogram bins
+    (or using unique values directly when A is already discrete).
+    """
     discrete_features = name == "self_interactions"
     mi = float(
         mutual_info_classif(A.reshape(-1, 1), y, discrete_features=discrete_features, random_state=seed)[0]
     )
-    print(f"    MI(A;Y) = {mi:.4f}  (related? {'Yes' if mi > 0 else 'No'})", file=sys.stderr)
+
+    _, y_counts = np.unique(y, return_counts=True)
+    h_y = _entropy(y_counts)
+
+    if discrete_features:
+        _, a_counts = np.unique(A, return_counts=True)
+    else:
+        a_counts, _ = np.histogram(A, bins=n_bins)
+    h_a = _entropy(a_counts)
+
+    denom = np.sqrt(h_a * h_y)
+    nmi = float(np.clip(mi / denom, 0.0, 1.0)) if denom > 0 else 0.0
+    print(f"    NMI(A;Y) = {nmi:.4f}  (related? {'Yes' if nmi > 0 else 'No'})", file=sys.stderr)
 
     if X.shape[0] < 10:
         detectability = 0.0
@@ -154,7 +178,7 @@ def analyse(A, X, y, name, seed=42):
         reg.fit(X, A)
         detectability = float(spearmanr(A, reg.predict(X))[0])
 
-    return {"mi": mi, "related": mi > 0, "detectability": detectability}
+    return {"nmi": nmi, "related": nmi > 0, "detectability": detectability}
 
 
 ATTRIBUTES = {
@@ -173,15 +197,15 @@ def write_mqc(attribute, results):
         fh.write(
             f"# id: 'bias_{attribute}'\n"
             f"# section_name: 'Bias: {attribute}'\n"
-            f"# description: 'Utility MI(A;Y) and detectability (Ridge Spearman ρ) for {attribute}.'\n"
+            f"# description: 'Utility NMI(A;Y) = MI/sqrt(H(A)·H(Y)) and detectability (Ridge Spearman ρ) for {attribute}.'\n"
             "# plot_type: 'table'\n"
             "# pconfig:\n"
             f"#     id: 'bias_{attribute}_table'\n"
             f"#     title: 'Bias: {attribute}'\n"
-            "Split\tMI(A;Y)\tRelated?\tDetectability (Spearman ρ)\n"
+            "Split\tNMI(A;Y)\tRelated?\tDetectability (Spearman ρ)\n"
         )
         for split, r in results:
-            fh.write(f"{split}\t{r['mi']:.4f}\t{'Yes' if r['related'] else 'No'}\t{r['detectability']:.4f}\n")
+            fh.write(f"{split}\t{r['nmi']:.4f}\t{'Yes' if r['related'] else 'No'}\t{r['detectability']:.4f}\n")
 
 
 def main():
@@ -229,7 +253,7 @@ def main():
         A = compute(pairs_f, blast_sim, embeddings, go_anns)
         r = analyse(A, X, y_f, args.attribute, seed=args.seed)
         results.append((split, r))
-        print(f"  [{split}] MI={r['mi']:.4f}  ρ={r['detectability']:.4f}", file=sys.stderr)
+        print(f"  [{split}] MI={r['nmi']:.4f}  ρ={r['detectability']:.4f}", file=sys.stderr)
 
     write_mqc(args.attribute, results)
 
