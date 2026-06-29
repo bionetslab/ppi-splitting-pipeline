@@ -31,7 +31,7 @@ from collections import defaultdict
 import numpy as np
 import plotly.graph_objects as go
 from scipy.stats import spearmanr
-from sklearn.ensemble import HistGradientBoostingRegressor
+from sklearn.linear_model import Ridge
 from sklearn.feature_selection import mutual_info_classif
 
 
@@ -159,10 +159,9 @@ def analyse(A, X, y, name, seed=42):
     if X.shape[0] < 10:
         detectability = 0.0
     else:
-        A_jit = A + np.random.default_rng(seed).random(len(A)).astype(np.float32) * 1e-6
-        reg = HistGradientBoostingRegressor(max_iter=100, max_depth=5, random_state=seed)
-        reg.fit(X, A_jit)
-        detectability = float(spearmanr(A_jit, reg.predict(X))[0])
+        reg = Ridge(alpha=1.0, solver="sag", random_state=seed, max_iter=1000)
+        reg.fit(X, A)
+        detectability = float(spearmanr(A, reg.predict(X))[0])
 
     return {"mi": mi, "related": mi > 0, "detectability": detectability}
 
