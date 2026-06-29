@@ -13,7 +13,7 @@ functional_relatedness_BP/MF/CC – Jaccard similarity of GO Biological Process,
                                   sets between the two proteins in a pair
 
 Utility       = MI(A; Y) via sklearn kNN estimator (continuous A)
-Detectability = 5-fold CV Spearman ρ of Random Forest Regressor predicting A
+Detectability = Spearman ρ of Random Forest Regressor predicting A
                 from the pair embedding X
 
 Outputs
@@ -33,8 +33,7 @@ import plotly.graph_objects as go
 from scipy.stats import spearmanr
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.feature_selection import mutual_info_classif
-from sklearn.metrics import make_scorer
-from sklearn.model_selection import cross_val_score
+
 
 
 def read_labelled_csv(path):
@@ -144,15 +143,13 @@ def func_relatedness(pairs, go_anns, category):
     return np.array(sims, dtype=np.float32)
 
 
-_spearman_scorer = make_scorer(lambda y_true, y_pred: spearmanr(y_true, y_pred)[0])
-
 # ColorBrewer Set2 qualitative palette (8 colours)
 _SET2 = ["#66C2A5", "#FC8D62", "#8DA0CB", "#E78AC3",
          "#A6D854", "#FFD92F", "#E5C494", "#B3B3B3"]
 
 
 def analyse(A, X, y, name, seed=42):
-    """Return dict with mi, related, detectability (5-fold CV Spearman ρ)."""
+    """Return dict with mi, related, detectability (train-set Spearman ρ)."""
     if name == "self_interactions":
         discrete_features = True
     else:
@@ -164,9 +161,10 @@ def analyse(A, X, y, name, seed=42):
     if X.shape[0] < 10:
         detectability = 0.0
     else:
-        rf = RandomForestRegressor(n_estimators=100, max_depth=5, max_samples=0.2, random_state=seed, n_jobs=-1)
         A_jit = A + np.random.default_rng(seed).random(len(A)).astype(np.float32) * 1e-6
-        detectability = float(cross_val_score(rf, X, A_jit, cv=5, scoring=_spearman_scorer).mean())
+        rf = RandomForestRegressor(n_estimators=100, max_depth=5, max_samples=0.2, random_state=seed, n_jobs=-1)
+        rf.fit(X, A_jit)
+        detectability = float(spearmanr(A_jit, rf.predict(X))[0])
 
     return {"mi": mi, "related": mi > 0, "detectability": detectability}
 
