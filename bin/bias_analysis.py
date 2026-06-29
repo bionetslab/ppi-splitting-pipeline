@@ -164,7 +164,7 @@ def analyse(A, X, y, name, seed=42):
     if X.shape[0] < 10:
         detectability = 0.0
     else:
-        rf = RandomForestRegressor(n_estimators=100, random_state=seed, n_jobs=-1)
+        rf = RandomForestRegressor(n_estimators=100, max_depth=5, max_samples=0.2, random_state=seed, n_jobs=-1)
         A_jit = A + np.random.default_rng(seed).random(len(A)).astype(np.float32) * 1e-6
         detectability = float(cross_val_score(rf, X, A_jit, cv=5, scoring=_spearman_scorer).mean())
 
