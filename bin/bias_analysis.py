@@ -148,7 +148,7 @@ _SET2 = ["#66C2A5", "#FC8D62", "#8DA0CB", "#E78AC3",
          "#A6D854", "#FFD92F", "#E5C494", "#B3B3B3"]
 
 
-def analyse(A, X, y, name, seed=42):
+def analyse(A, X, y, name, seed=42, max_samples=10_000):
     """Return dict with mi, related, detectability (train-set Spearman ρ)."""
     if name == "self_interactions":
         discrete_features = True
@@ -158,6 +158,12 @@ def analyse(A, X, y, name, seed=42):
         mutual_info_classif(A.reshape(-1, 1), y, discrete_features=discrete_features, random_state=seed)[0]
     )
     print(f"    MI(A;Y) = {mi:.4f}  (related? {'Yes' if mi > 0 else 'No'})", file=sys.stderr)
+
+    # subsample for RF because it takes too long
+    if len(A) > max_samples:
+        rng = np.random.default_rng(seed)
+        idx = rng.choice(len(A), size=max_samples, replace=False)
+        A, X, y = A[idx], X[idx], y[idx]
 
     if X.shape[0] < 10:
         detectability = 0.0
