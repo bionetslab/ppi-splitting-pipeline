@@ -157,6 +157,7 @@ def analyse(A, X, y, name, seed=42):
     mi = float(
         mutual_info_classif(A.reshape(-1, 1), y, discrete_features=discrete_features, random_state=seed)[0]
     )
+    print(f"    MI(A;Y) = {mi:.4f}  (related? {'Yes' if mi > 0 else 'No'})", file=sys.stderr)
 
     if X.shape[0] < 10:
         detectability = 0.0
@@ -345,6 +346,7 @@ def main():
 
         results = []
         for name, A in attrs:
+            print(f"  Analyzing {name} ...", file=sys.stderr)
             r = analyse(A, X, y_f, name, seed=args.seed)
             results.append((name, r))
             print(f"  [{split}] {name}: MI={r['mi']:.4f}  related={r['related']}  ρ={r['detectability']:.4f}", file=sys.stderr)
