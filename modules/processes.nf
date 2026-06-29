@@ -284,6 +284,31 @@ process BIAS_ANALYSIS {
     """
 }
 
+process SIMILARITY_HEATMAP {
+    publishDir "${params.outdir}/multiqc", mode: 'copy'
+    tag "heatmap"
+
+    input:
+    path train_fasta
+    path val_fasta
+    path test_fasta
+    path blast_tsv
+
+    output:
+    path "similarity_heatmap_mqc.html"
+
+    script:
+    """
+    plot_similarity_heatmap.py \\
+        --train_fasta ${train_fasta} \\
+        --val_fasta   ${val_fasta} \\
+        --test_fasta  ${test_fasta} \\
+        --blast       ${blast_tsv} \\
+        --max_per_split ${params.heatmap_max_per_split} \\
+        --seed        ${params.seed}
+    """
+}
+
 process MULTIQC {
     publishDir "${params.outdir}/multiqc", mode: 'copy'
     tag "multiqc"

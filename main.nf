@@ -26,6 +26,7 @@ include {
     EMBED_SEQUENCES
     TRAIN_CLASSIFIER
     BIAS_ANALYSIS
+    SIMILARITY_HEATMAP
     MULTIQC
 } from './modules/processes'
 
@@ -67,14 +68,16 @@ workflow {
         embeddings = Channel.value(file(params.embedding_model, checkIfExists: true))
     }
 
-    clf  = TRAIN_CLASSIFIER(neg.train, neg.val, neg.test_balanced, neg.test_realistic, embeddings)
-    bias = BIAS_ANALYSIS(neg.train, neg.val, neg.test_balanced, neg.test_realistic, blast_out, embeddings, fetched.go_annotations)
+    clf      = TRAIN_CLASSIFIER(neg.train, neg.val, neg.test_balanced, neg.test_realistic, embeddings)
+    bias     = BIAS_ANALYSIS(neg.train, neg.val, neg.test_balanced, neg.test_realistic, blast_out, embeddings, fetched.go_annotations)
+    heatmap  = SIMILARITY_HEATMAP(nr.train_fasta, nr.val_fasta, nr.test_fasta, blast_out)
 
     mqc_files = sorted.mqc
         .mix(nr.mqc)
         .mix(neg.mqc)
         .mix(clf.mqc)
         .mix(bias.mqc)
+        .mix(heatmap)
         .collect()
 
     MULTIQC(mqc_files)
