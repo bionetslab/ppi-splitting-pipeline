@@ -18,3 +18,4 @@ dependencies:
     - torch
     - transformers
     - sentencepiece
+    - protobuf

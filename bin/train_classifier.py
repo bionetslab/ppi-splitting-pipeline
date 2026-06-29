@@ -27,11 +27,11 @@ from sklearn.metrics import (
 )
 
 HP_CONFIGS = [
-    {"n_estimators": 100, "max_depth": None, "max_features": "sqrt"},
-    {"n_estimators": 200, "max_depth": None, "max_features": "sqrt"},
-    {"n_estimators": 100, "max_depth": 20,   "max_features": "sqrt"},
-    {"n_estimators": 200, "max_depth": 20,   "max_features": "log2"},
-    {"n_estimators": 300, "max_depth": None, "max_features": "log2"},
+    {"n_estimators": 100, "max_depth": 10, "max_features": "sqrt"},
+    {"n_estimators": 100, "max_depth": 15, "max_features": "sqrt"},
+    {"n_estimators": 100, "max_depth": 10, "max_features": "log2"},
+    {"n_estimators": 100, "max_depth": 15, "max_features": "log2"},
+    {"n_estimators": 200, "max_depth": 15, "max_features": "sqrt"},
 ]
 
 
