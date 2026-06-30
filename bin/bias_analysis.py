@@ -130,44 +130,6 @@ def func_relatedness(pairs, go_anns, category):
     return np.array(sims, dtype=np.float32)
 
 
-STRING_COLUMNS = {
-    "experiments", "experiments_transferred",
-    "database", "database_transferred",
-    "textmining", "textmining_transferred",
-    "combined_score",
-}
-
-
-def load_string_scores(ppis_path, column):
-    """Return {(min_p, max_p): score/1000} for a STRING column, or None if absent/constant."""
-    scores = {}
-    with open(ppis_path) as fh:
-        reader = csv.DictReader(fh)
-        if column not in (reader.fieldnames or []):
-            return None
-        for row in reader:
-            p1, p2 = row["protein1"].strip(), row["protein2"].strip()
-            key = (min(p1, p2), max(p1, p2))
-            try:
-                scores[key] = float(row[column]) / 1000.0
-            except (ValueError, KeyError):
-                pass
-    if not scores:
-        return None
-    vals = set(scores.values())
-    if len(vals) == 1:
-        return None  # constant – uninformative
-    return scores
-
-
-def string_score_within_pair(pairs, scores):
-    """STRING score for each pair; 0.0 for pairs absent from the STRING file."""
-    A = []
-    for p1, p2 in pairs:
-        key = (min(p1, p2), max(p1, p2))
-        A.append(scores.get(key, 0.0))
-    return np.array(A, dtype=np.float32)
-
 
 def _entropy(counts):
     """Shannon entropy in nats; ignores zero-count bins."""
@@ -241,7 +203,8 @@ def write_mqc(attribute, results):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--attribute",      required=True,
-                    help="built-in attribute name or 'string_<column>'")
+                    choices=list(ATTRIBUTES),
+                    help="attribute to analyse")
     ap.add_argument("--train",           required=True)
     ap.add_argument("--val",             required=True)
     ap.add_argument("--test_balanced",   required=True)
@@ -249,34 +212,12 @@ def main():
     ap.add_argument("--blast",           required=True)
     ap.add_argument("--embeddings",      required=True)
     ap.add_argument("--go_annotations",  required=True)
-    ap.add_argument("--ppis",            default=None,
-                    help="original PPI CSV; required for string_* attributes")
     ap.add_argument("--seed",            type=int, default=42)
     args = ap.parse_args()
 
     print(f"=== {args.attribute} ===", file=sys.stderr)
 
-    # Resolve compute function ------------------------------------------------
-    is_string = args.attribute.startswith("string_")
-
-    if is_string:
-        col = args.attribute[len("string_"):]
-        if col not in STRING_COLUMNS:
-            print(f"Unknown STRING column '{col}', skipping.", file=sys.stderr)
-            sys.exit(0)
-        if args.ppis is None:
-            print("--ppis required for string_* attributes, skipping.", file=sys.stderr)
-            sys.exit(0)
-        string_scores = load_string_scores(args.ppis, col)
-        if string_scores is None:
-            print(f"Column '{col}' absent or constant in {args.ppis}, skipping.", file=sys.stderr)
-            sys.exit(0)
-        compute = lambda pairs, blast_sim, emb, go: string_score_within_pair(pairs, string_scores)
-    elif args.attribute in ATTRIBUTES:
-        compute = ATTRIBUTES[args.attribute]
-    else:
-        ap.error(f"Unknown attribute '{args.attribute}'. "
-                 f"Choose from {list(ATTRIBUTES)} or 'string_<column>'.")
+    compute = ATTRIBUTES[args.attribute]
 
     # Load data ---------------------------------------------------------------
     print("Loading embeddings ...", file=sys.stderr)

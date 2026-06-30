@@ -71,36 +71,17 @@ workflow {
 
     clf      = TRAIN_CLASSIFIER(neg.train, neg.val, neg.test_balanced, neg.test_realistic, embeddings)
 
-    def string_cols = [
-        "experiments", "experiments_transferred",
-        "database", "database_transferred",
-        "textmining", "textmining_transferred",
-        "combined_score",
-    ]
-    bias_base_ch = Channel.of(
-        "sequence_similarity",
-        "embedding_similarity",
-        "functional_relatedness_BP",
-        "functional_relatedness_MF",
-        "functional_relatedness_CC",
-        "self_interactions",
-    )
-    string_attrs_ch = ppis_ch
-        .splitCsv(header: false, limit: 1)
-        .flatten()
-        .filter { col -> col in string_cols }
-        .map    { col -> "string_${col}" }
-
     bias = BIAS_ANALYSIS(
-        bias_base_ch.mix(string_attrs_ch).collect(),
+        ["sequence_similarity", "embedding_similarity",
+         "functional_relatedness_BP", "functional_relatedness_MF",
+         "functional_relatedness_CC", "self_interactions"],
         neg.train,
         neg.val,
         neg.test_balanced,
         neg.test_realistic,
         blast_out,
         embeddings,
-        fetched.go_annotations,
-        ppis_ch
+        fetched.go_annotations
     )
     scatter  = COLLECT_BIAS(bias.mqc.collect())
     heatmap  = SIMILARITY_HEATMAP(nr.train_fasta, nr.val_fasta, nr.test_fasta, blast_out)
