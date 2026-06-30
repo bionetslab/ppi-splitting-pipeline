@@ -71,17 +71,27 @@ workflow {
 
     clf      = TRAIN_CLASSIFIER(neg.train, neg.val, neg.test_balanced, neg.test_realistic, embeddings)
 
+    same_species_ch = fetched.species
+        .splitCsv(header: true, sep: '\t')
+        .map    { row -> row.taxon_id }
+        .collect()
+        .map    { ids -> ids.unique() }
+        .filter { ids -> ids.size() > 1 }
+        .map    { "same_species" }
+
     bias = BIAS_ANALYSIS(
-        ["sequence_similarity", "embedding_similarity",
-         "functional_relatedness_BP", "functional_relatedness_MF",
-         "functional_relatedness_CC", "self_interactions"],
+        Channel.of("sequence_similarity", "embedding_similarity",
+                   "functional_relatedness_BP", "functional_relatedness_MF",
+                   "functional_relatedness_CC", "self_interactions")
+               .mix(same_species_ch).collect(),
         neg.train,
         neg.val,
         neg.test_balanced,
         neg.test_realistic,
         blast_out,
         embeddings,
-        fetched.go_annotations
+        fetched.go_annotations,
+        fetched.species
     )
     scatter  = COLLECT_BIAS(bias.mqc.collect())
     heatmap  = SIMILARITY_HEATMAP(nr.train_fasta, nr.val_fasta, nr.test_fasta, blast_out)

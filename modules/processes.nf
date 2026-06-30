@@ -8,10 +8,11 @@ process FETCH_DATA {
     output:
     path "sequences.fasta",    emit: sequences
     path "go_annotations.tsv", emit: go_annotations
+    path "species.tsv",        emit: species
 
     script:
     """
-    fetch_data.py ${ppis} sequences.fasta go_annotations.tsv
+    fetch_data.py ${ppis} sequences.fasta go_annotations.tsv species.tsv
     """
 }
 
@@ -267,6 +268,7 @@ process BIAS_ANALYSIS {
     path blast_tsv
     path embeddings
     path go_annotations
+    path species
 
     output:
     path "*_bias_mqc.tsv", emit: mqc, optional: true
@@ -282,6 +284,7 @@ process BIAS_ANALYSIS {
         --blast           ${blast_tsv} \\
         --embeddings      ${embeddings} \\
         --go_annotations  ${go_annotations} \\
+        --species         ${species} \\
         --seed            ${params.seed}
     """
 }

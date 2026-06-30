@@ -36,7 +36,7 @@ def parse_blast(path, lengths, edge_weight):
             if len(cols) < 4:
                 continue
             q, s, evalue, bitscore_str = cols[0], cols[1], cols[2], cols[3]
-            s = s.split("|")[1]
+            s = s.split("|")[1] if "|" in s else s
             if q == s:
                 continue
             if q not in lengths or s not in lengths:

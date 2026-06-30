@@ -11,6 +11,7 @@ sequence_similarity           – BLAST pident between the pair, normalised to [
 embedding_similarity          – cosine similarity of the two protein embeddings
 functional_relatedness_BP/MF/CC – Jaccard similarity of GO term sets
 self_interactions             – 1 if both proteins are identical, 0 otherwise
+same species                  – 1 if both proteins belong to the same species, 0 otherwise
 
 Utility       = NMI(A; Y) = MI / sqrt(H(A)·H(Y)), MI estimated by sklearn kNN, H(A) by histogram
 Detectability = Spearman ρ of a Ridge regressor predicting A from the pair embedding X
@@ -112,6 +113,26 @@ def self_interactions(pairs):
     return np.array([1.0 if p1 == p2 else 0.0 for p1, p2 in pairs], dtype=np.float32)
 
 
+def load_species(path):
+    """Return {protein_id: taxon_id} from the two-column TSV written by fetch_data.py."""
+    mapping = {}
+    with open(path) as fh:
+        reader = csv.DictReader(fh, delimiter="\t")
+        for row in reader:
+            mapping[row["protein_id"].strip()] = row["taxon_id"].strip()
+    return mapping
+
+
+def same_species_indicator(pairs, species_map):
+    """1 if both proteins in the pair belong to the same species, 0 otherwise."""
+    A = []
+    for p1, p2 in pairs:
+        t1 = species_map.get(p1, "")
+        t2 = species_map.get(p2, "")
+        A.append(1.0 if t1 and t2 and t1 == t2 else 0.0)
+    return np.array(A, dtype=np.float32)
+
+
 def _prepare_split(pairs, y, embeddings):
     """Return (X, filtered_pairs, filtered_y) keeping only pairs with embeddings."""
     X, mask = build_pair_X(pairs, embeddings)
@@ -174,12 +195,13 @@ def analyse(A, X, y, name, seed=42, n_bins=10):
 
 
 ATTRIBUTES = {
-    "sequence_similarity":       lambda pairs, blast_sim, emb, go: seq_sim_within_pair(pairs, blast_sim),
-    "embedding_similarity":      lambda pairs, blast_sim, emb, go: emb_sim_within_pair(pairs, emb),
-    "functional_relatedness_BP": lambda pairs, blast_sim, emb, go: func_relatedness(pairs, go, "BP"),
-    "functional_relatedness_MF": lambda pairs, blast_sim, emb, go: func_relatedness(pairs, go, "MF"),
-    "functional_relatedness_CC": lambda pairs, blast_sim, emb, go: func_relatedness(pairs, go, "CC"),
-    "self_interactions":         lambda pairs, blast_sim, emb, go: self_interactions(pairs),
+    "sequence_similarity":       lambda pairs, blast_sim, emb, go, sp: seq_sim_within_pair(pairs, blast_sim),
+    "embedding_similarity":      lambda pairs, blast_sim, emb, go, sp: emb_sim_within_pair(pairs, emb),
+    "functional_relatedness_BP": lambda pairs, blast_sim, emb, go, sp: func_relatedness(pairs, go, "BP"),
+    "functional_relatedness_MF": lambda pairs, blast_sim, emb, go, sp: func_relatedness(pairs, go, "MF"),
+    "functional_relatedness_CC": lambda pairs, blast_sim, emb, go, sp: func_relatedness(pairs, go, "CC"),
+    "self_interactions":         lambda pairs, blast_sim, emb, go, sp: self_interactions(pairs),
+    "same_species":              lambda pairs, blast_sim, emb, go, sp: same_species_indicator(pairs, sp),
 }
 
 
@@ -212,6 +234,8 @@ def main():
     ap.add_argument("--blast",           required=True)
     ap.add_argument("--embeddings",      required=True)
     ap.add_argument("--go_annotations",  required=True)
+    ap.add_argument("--species",         default=None,
+                    help="species.tsv from fetch_data; required for same_species attribute")
     ap.add_argument("--seed",            type=int, default=42)
     args = ap.parse_args()
 
@@ -232,6 +256,12 @@ def main():
     if args.attribute.startswith("functional_relatedness"):
         go_anns = load_go_annotations(args.go_annotations)
 
+    species = None
+    if args.attribute == "same_species":
+        if args.species is None:
+            sys.exit("--species is required for the same_species attribute")
+        species = load_species(args.species)
+
     split_paths = [
         ("train",          args.train),
         ("val",            args.val),
@@ -244,7 +274,7 @@ def main():
         pairs, y = read_labelled_csv(path)
         X, pairs_f, y_f = _prepare_split(pairs, y, embeddings)
         print(f"  {X.shape[0]} {split} pairs retained", file=sys.stderr)
-        A = compute(pairs_f, blast_sim, embeddings, go_anns)
+        A = compute(pairs_f, blast_sim, embeddings, go_anns, species)
         r = analyse(A, X, y_f, args.attribute, seed=args.seed)
         results.append((split, r))
         print(f"  [{split}] NMI={r['nmi']:.4f}  ρ={r['detectability']:.4f}", file=sys.stderr)
