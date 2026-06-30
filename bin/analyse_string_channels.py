@@ -2,15 +2,14 @@
 """
 Standalone analysis: how well do STRING evidence channels predict from pair embeddings?
 
-For each evidence channel, a Ridge regressor is fitted (with cross-validation) to
-predict the channel score from the concatenated embeddings of the two proteins.
-Spearman ρ between predicted and actual scores is reported.
+A Ridge regressor is fitted on positive pairs from the training split and evaluated
+on positive pairs from the test split. Spearman ρ between predicted and actual scores
+is reported per channel.
 
 Only POSITIVE pairs are used, because negatives have no STRING score — including
 them at 0.0 would trivially confound the analysis with the label.
 
-Evidence channels analysed (combined_score is excluded because it is derived from
-the others and would just reflect their aggregate):
+Evidence channels analysed (combined_score excluded — it is derived from the others):
   experiments, experiments_transferred,
   database, database_transferred,
   textmining, textmining_transferred
@@ -18,9 +17,10 @@ the others and would just reflect their aggregate):
 Usage
 -----
     python analyse_string_channels.py \\
-        --ppis       ppis.csv \\
+        --train      train.csv \\
+        --test       test.csv \\
         --embeddings embeddings.npz \\
-        [--cv 5] [--seed 42] [--out string_channel_analysis.tsv]
+        [--seed 42] [--out string_channel_analysis.tsv]
 """
 
 import argparse
@@ -31,7 +31,6 @@ import sys
 import numpy as np
 from scipy.stats import spearmanr
 from sklearn.linear_model import Ridge
-from sklearn.model_selection import cross_val_predict
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from utils import load_embeddings
@@ -46,21 +45,16 @@ STRING_CHANNELS = [
 ]
 
 
-def load_positives(ppis_path, channels):
+def load_positives(path, channels):
     """Return (rows, available_channels) for positive pairs only.
 
     Each row is (protein1, protein2, {channel: score/1000}).
     Channels absent from the file are silently dropped from available_channels.
     """
     rows = []
-    available = []
-    with open(ppis_path) as fh:
+    with open(path) as fh:
         reader = csv.DictReader(fh)
-        fieldnames = reader.fieldnames or []
-        available = [c for c in channels if c in fieldnames]
-        if not available:
-            sys.exit(f"None of the STRING channels found in {ppis_path}. "
-                     "Make sure the file has STRING score columns.")
+        available = [c for c in channels if c in (reader.fieldnames or [])]
         for row in reader:
             try:
                 label = int(row.get("label", row.get("interaction", "1")))
@@ -80,29 +74,18 @@ def load_positives(ppis_path, channels):
     return rows, available
 
 
-def build_matrices(rows, embeddings, available):
-    """Build X (pair embeddings) and per-channel A arrays.
-
-    Pairs where either protein has no embedding are skipped.
-    Returns (X, {channel: A_array}).
-    """
+def build_matrices(rows, embeddings, channels):
+    """Build (X, {channel: A}) for pairs where both proteins have embeddings."""
     X_list = []
-    channel_lists = {c: [] for c in available}
+    channel_lists = {c: [] for c in channels}
 
-    for p1, p2 in ((r[0], r[1]) for r in rows):
+    for p1, p2, scores in rows:
         if p1 not in embeddings or p2 not in embeddings:
             continue
         a, b = (p1, p2) if p1 <= p2 else (p2, p1)
         X_list.append(np.concatenate([embeddings[a], embeddings[b]]))
-
-    # Re-iterate to keep alignment with X_list
-    idx = 0
-    for p1, p2, scores in rows:
-        if p1 not in embeddings or p2 not in embeddings:
-            continue
-        for c in available:
+        for c in channels:
             channel_lists[c].append(scores[c])
-        idx += 1
 
     X = np.array(X_list, dtype=np.float32)
     A_by_channel = {c: np.array(v, dtype=np.float32) for c, v in channel_lists.items()}
@@ -111,14 +94,14 @@ def build_matrices(rows, embeddings, available):
 
 def main():
     ap = argparse.ArgumentParser(
-        description="Predict STRING evidence channel scores from pair embeddings (positives only)."
+        description="Predict STRING evidence channel scores from pair embeddings."
     )
-    ap.add_argument("--ppis",       required=True,
-                    help="PPI CSV with 'protein1', 'protein2', 'label' and STRING score columns")
+    ap.add_argument("--train",      required=True,
+                    help="Training CSV with 'protein1', 'protein2', 'label' and STRING columns")
+    ap.add_argument("--test",       required=True,
+                    help="Test CSV in the same format")
     ap.add_argument("--embeddings", required=True,
                     help="Pre-computed embeddings .npz (output of embed_sequences.py)")
-    ap.add_argument("--cv",         type=int, default=5,
-                    help="Cross-validation folds for Ridge regression (default: 5)")
     ap.add_argument("--seed",       type=int, default=42)
     ap.add_argument("--out",        default="string_channel_analysis.tsv",
                     help="Output TSV path (default: string_channel_analysis.tsv)")
@@ -127,39 +110,49 @@ def main():
     print("Loading embeddings ...", file=sys.stderr)
     embeddings = load_embeddings(args.embeddings)
 
-    print(f"Loading positive pairs from {args.ppis} ...", file=sys.stderr)
-    rows, available = load_positives(args.ppis, STRING_CHANNELS)
-    print(f"  {len(rows)} positive pairs loaded", file=sys.stderr)
-    print(f"  Available channels: {available}", file=sys.stderr)
+    print(f"Loading train positives from {args.train} ...", file=sys.stderr)
+    train_rows, available = load_positives(args.train, STRING_CHANNELS)
+    if not available:
+        sys.exit(f"None of the STRING channels found in {args.train}.")
+    print(f"  {len(train_rows)} positive pairs, channels: {available}", file=sys.stderr)
 
-    X, A_by_channel = build_matrices(rows, embeddings, available)
-    print(f"  {X.shape[0]} pairs retained after embedding lookup", file=sys.stderr)
+    print(f"Loading test positives from {args.test} ...", file=sys.stderr)
+    test_rows, _ = load_positives(args.test, available)
+    print(f"  {len(test_rows)} positive pairs", file=sys.stderr)
 
-    if X.shape[0] < args.cv:
-        sys.exit(f"Too few pairs ({X.shape[0]}) for {args.cv}-fold CV. "
-                 "Reduce --cv or provide more data.")
+    X_train, A_train = build_matrices(train_rows, embeddings, available)
+    X_test,  A_test  = build_matrices(test_rows,  embeddings, available)
+    print(f"  {X_train.shape[0]} train / {X_test.shape[0]} test pairs after embedding lookup",
+          file=sys.stderr)
 
-    header = f"{'Channel':<30} {'Spearman ρ':>12} {'p-value':>14} {'Score mean':>12} {'Score std':>10}"
+    header = (f"{'Channel':<30} {'Train ρ':>9} {'Test ρ':>9} "
+              f"{'p-value':>12} {'Score mean (tr)':>16} {'Score std (tr)':>15}")
     print(f"\n{header}")
     print("-" * len(header))
 
     results = []
     for channel in available:
-        A = A_by_channel[channel]
-        if A.std() == 0:
-            print(f"{channel:<30} {'(constant, skipped)':>12}")
+        A_tr = A_train[channel]
+        A_te = A_test[channel]
+
+        if A_tr.std() == 0:
+            print(f"{channel:<30} {'(constant in train, skipped)'}")
             continue
 
         reg = Ridge(alpha=1.0, solver="sag", random_state=args.seed, max_iter=100)
-        A_pred = cross_val_predict(reg, X, A, cv=args.cv)
-        rho, pval = spearmanr(A, A_pred)
+        reg.fit(X_train, A_tr)
 
-        print(f"{channel:<30} {rho:>12.4f} {pval:>14.4e} {A.mean():>12.4f} {A.std():>10.4f}")
-        results.append((channel, rho, pval, float(A.mean()), float(A.std())))
+        train_rho, _     = spearmanr(A_tr, reg.predict(X_train))
+        test_rho,  pval  = spearmanr(A_te, reg.predict(X_test))
+
+        print(f"{channel:<30} {train_rho:>9.4f} {test_rho:>9.4f} "
+              f"{pval:>12.4e} {A_tr.mean():>16.4f} {A_tr.std():>15.4f}")
+        results.append((channel, train_rho, test_rho, pval, float(A_tr.mean()), float(A_tr.std())))
 
     with open(args.out, "w", newline="") as fh:
         writer = csv.writer(fh, delimiter="\t")
-        writer.writerow(["channel", "spearman_rho", "p_value", "score_mean", "score_std"])
+        writer.writerow(["channel", "train_spearman_rho", "test_spearman_rho",
+                         "p_value", "score_mean_train", "score_std_train"])
         writer.writerows(results)
     print(f"\nResults written to {args.out}", file=sys.stderr)
 
