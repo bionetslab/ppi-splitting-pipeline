@@ -13,45 +13,40 @@ All output files have columns: protein1, protein2, label  (1 = positive, 0 = neg
 
 import argparse
 import csv
+import os
 import random
 import sys
 from collections import defaultdict
 
-
-def read_ppis(path):
-    pairs = []
-    with open(path) as fh:
-        reader = csv.DictReader(fh)
-        for row in reader:
-            pairs.append((row["protein1"].strip(), row["protein2"].strip()))
-    return pairs
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from utils import read_ppis
 
 
-def _positive_set(ppis):
-    return {(min(p1, p2), max(p1, p2)) for p1, p2 in ppis}
+def _positive_set(rows):
+    return {(min(r["protein1"], r["protein2"]), max(r["protein1"], r["protein2"])) for r in rows}
 
 
-def _stub_pool(ppis):
+def _stub_pool(rows):
     degree = defaultdict(int)
-    for p1, p2 in ppis:
-        degree[p1] += 1
-        degree[p2] += 1
+    for r in rows:
+        degree[r["protein1"]] += 1
+        degree[r["protein2"]] += 1
     return [p for p, d in degree.items() for _ in range(d)]
 
 
-def sample_negatives(ppis, ratio=1, degree_weighted=True, seed=42):
-    """Sample ratio * len(ppis) negatives.
+def sample_negatives(rows, ratio=1, degree_weighted=True, seed=42):
+    """Sample ratio * len(rows) negatives.
 
     degree_weighted=True  uses a stub pool (protein appears degree(p) times),
                           preserving positive degree in expectation.
     degree_weighted=False draws endpoints uniformly at random.
     """
     rng = random.Random(seed)
-    positives = _positive_set(ppis)
-    if not ppis:
+    positives = _positive_set(rows)
+    if not rows:
         return []
-    pool = _stub_pool(ppis) if degree_weighted else sorted({p for pair in ppis for p in pair})
-    target = ratio * len(ppis)
+    pool = _stub_pool(rows) if degree_weighted else sorted({p for r in rows for p in (r["protein1"], r["protein2"])})
+    target = ratio * len(rows)
     negatives = set()
     for _ in range(target * 100):
         if len(negatives) >= target:
@@ -64,14 +59,25 @@ def sample_negatives(ppis, ratio=1, degree_weighted=True, seed=42):
     return sorted(negatives)
 
 
-def write_combined(positives, negatives, path):
+def write_combined(pos_rows, negatives, path):
+    extra_fields = [k for k in (pos_rows[0].keys() if pos_rows else [])
+                    if k not in ("protein1", "protein2")]
+    fieldnames = ["protein1", "protein2", "label"] + extra_fields
     with open(path, "w", newline="") as fh:
-        writer = csv.writer(fh)
-        writer.writerow(["protein1", "protein2", "label"])
-        for p1, p2 in positives:
-            writer.writerow([p1, p2, 1])
+        writer = csv.DictWriter(fh, fieldnames=fieldnames)
+        writer.writeheader()
+        for row in pos_rows:
+            out = {f: row.get(f, "") for f in extra_fields}
+            out["protein1"] = row["protein1"]
+            out["protein2"] = row["protein2"]
+            out["label"] = 1
+            writer.writerow(out)
         for p1, p2 in negatives:
-            writer.writerow([p1, p2, 0])
+            out = {f: "" for f in extra_fields}
+            out["protein1"] = p1
+            out["protein2"] = p2
+            out["label"] = 0
+            writer.writerow(out)
 
 
 def write_mqc(split_results, n_random_test):
@@ -131,20 +137,20 @@ def main():
         ("val",   args.val,   "val.csv"),
         ("test",  args.test,  "test_balanced.csv"),
     ]:
-        ppis = read_ppis(src)
-        negs = sample_negatives(ppis, seed=args.seed)
-        write_combined(ppis, negs, out)
-        print(f"{name}: {len(ppis)} positives → {len(negs)} negatives sampled", file=sys.stderr)
+        rows = read_ppis(src)
+        negs = sample_negatives(rows, seed=args.seed)
+        write_combined(rows, negs, out)
+        print(f"{name}: {len(rows)} positives → {len(negs)} negatives sampled", file=sys.stderr)
         split_results.append({
             "name": name,
-            "n_positives": len(ppis),
+            "n_positives": len(rows),
             "n_negatives": len(negs),
         })
 
-    test_ppis = read_ppis(args.test)
-    random_negs = sample_negatives(test_ppis, ratio=10, degree_weighted=False, seed=args.seed)
-    write_combined(test_ppis, random_negs, "test_realistic.csv")
-    print(f"test (random 1:10): {len(test_ppis)} positives → {len(random_negs)} negatives sampled", file=sys.stderr)
+    test_rows = read_ppis(args.test)
+    random_negs = sample_negatives(test_rows, ratio=10, degree_weighted=False, seed=args.seed)
+    write_combined(test_rows, random_negs, "test_realistic.csv")
+    print(f"test (random 1:10): {len(test_rows)} positives → {len(random_negs)} negatives sampled", file=sys.stderr)
 
     write_mqc(split_results, n_random_test=len(random_negs))
 

@@ -6,16 +6,20 @@ Feature construction: concatenation of the two sorted protein embeddings.
 Sorting by protein ID ensures the feature vector is the same regardless of
 the order in which the pair appears in the CSV.
 
-Hyperparameter search: 5 pre-defined configs evaluated by AUROC on val set.
-The best config is retrained on train+val, then evaluated on both test sets.
+Hyperparameter search: 3 pre-defined configs (max_depth 5/10/30, max_samples 0.2)
+evaluated by AUROC on val set. The best config is retrained on train+val, then
+evaluated on both test sets.
 """
 
 import argparse
-import csv
+import os
 import sys
 
 import numpy as np
 from sklearn.ensemble import RandomForestClassifier
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from utils import load_embeddings, read_labelled_csv
 from sklearn.metrics import (
     accuracy_score,
     average_precision_score,
@@ -32,14 +36,6 @@ HP_CONFIGS = [
     {"n_estimators": 100, "max_depth": 30, "max_samples": 0.2},
 ]
 
-
-def read_labelled_csv(path):
-    pairs, labels = [], []
-    with open(path) as fh:
-        for row in csv.DictReader(fh):
-            pairs.append((row["protein1"].strip(), row["protein2"].strip()))
-            labels.append(int(row["label"]))
-    return pairs, np.array(labels)
 
 
 def build_X(pairs, labels, embeddings):
@@ -76,7 +72,7 @@ def write_mqc(results):
         fh.write(
             "# id: 'classifier_metrics'\n"
             "# section_name: 'Classifier Performance'\n"
-            "# description: 'RandomForest PPI classifier. Hyperparameters tuned on val AUROC (5 configs), then retrained on train+val. Balanced test set: 1:1 ratio. Realistic test set: 1:10 ratio, uniform random negatives.'\n"
+            "# description: 'RandomForest PPI classifier. Hyperparameters tuned on val AUROC (3 configs: max_depth 5/10/30, max_samples 0.2), then retrained on train+val. Balanced test set: 1:1 ratio. Realistic test set: 1:10 ratio, uniform random negatives.'\n"
             "# plot_type: 'table'\n"
             "# pconfig:\n"
             "#     id: 'classifier_metrics_table'\n"
@@ -99,8 +95,7 @@ def main():
     args = ap.parse_args()
 
     print("Loading embeddings ...", file=sys.stderr)
-    raw = np.load(args.embeddings, allow_pickle=False)
-    embeddings = {k: raw[k] for k in raw.files}
+    embeddings = load_embeddings(args.embeddings)
     print(f"  {len(embeddings)} proteins", file=sys.stderr)
 
     train_pairs, y_train = read_labelled_csv(args.train)

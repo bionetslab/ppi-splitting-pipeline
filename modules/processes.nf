@@ -267,9 +267,10 @@ process BIAS_ANALYSIS {
     path blast_tsv
     path embeddings
     path go_annotations
+    path ppis
 
     output:
-    path "*_bias_mqc.tsv", emit: mqc
+    path "*_bias_mqc.tsv", emit: mqc, optional: true
 
     script:
     """
@@ -282,6 +283,7 @@ process BIAS_ANALYSIS {
         --blast           ${blast_tsv} \\
         --embeddings      ${embeddings} \\
         --go_annotations  ${go_annotations} \\
+        --ppis            ${ppis} \\
         --seed            ${params.seed}
     """
 }

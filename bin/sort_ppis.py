@@ -10,8 +10,12 @@ Rules:
 
 import argparse
 import csv
+import os
 import sys
 from collections import defaultdict
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from utils import read_fasta, read_ppis, write_fasta, write_ppi_csv
 
 
 def read_node_mapping(path):
@@ -35,39 +39,6 @@ def read_partition(path):
     return partitions
 
 
-def read_ppis(path):
-    pairs = []
-    with open(path) as fh:
-        reader = csv.DictReader(fh)
-        for row in reader:
-            pairs.append((row["protein1"].strip(), row["protein2"].strip()))
-    return pairs
-
-
-def read_fasta(path):
-    seqs = {}
-    acc = None
-    parts = []
-    with open(path) as fh:
-        for line in fh:
-            line = line.rstrip()
-            if line.startswith(">"):
-                if acc:
-                    seqs[acc] = "".join(parts)
-                acc = line[1:].split()[0]
-                parts = []
-            elif line:
-                parts.append(line)
-    if acc and parts:
-        seqs[acc] = "".join(parts)
-    return seqs
-
-
-def write_csv(pairs, path):
-    with open(path, "w", newline="") as fh:
-        writer = csv.writer(fh)
-        writer.writerow(["protein1", "protein2"])
-        writer.writerows(pairs)
 
 
 def write_mqc(n_input, n_proteins_input, split_results):
@@ -113,12 +84,6 @@ def write_mqc(n_input, n_proteins_input, split_results):
         fh.write(f"discarded\t{n_ppis_discarded}\n")
 
 
-def write_fasta(seqs, proteins, path):
-    with open(path, "w") as fh:
-        for p in sorted(proteins):
-            if p in seqs:
-                fh.write(f">{p}\n{seqs[p]}\n")
-
 
 def main():
     ap = argparse.ArgumentParser()
@@ -139,17 +104,18 @@ def main():
     }
 
     ppis = read_ppis(args.ppis)
-    all_proteins = {p for p1, p2 in ppis for p in (p1, p2)}
+    all_proteins = {p for row in ppis for p in (row["protein1"], row["protein2"])}
     seqs = read_fasta(args.fasta)
 
     # Bucket intra-partition PPIs
     part_ppis = defaultdict(list)
-    for p1, p2 in ppis:
+    for row in ppis:
+        p1, p2 = row["protein1"], row["protein2"]
         part1 = prot_to_part.get(p1)
         part2 = prot_to_part.get(p2)
         if part1 is None or part2 is None or part1 != part2:
             continue
-        part_ppis[part1].append((p1, p2))
+        part_ppis[part1].append(row)
 
     # Rank partitions by PPI count (largest → train)
     ranked = sorted(part_ppis.keys(), key=lambda p: len(part_ppis[p]), reverse=True)
@@ -163,14 +129,15 @@ def main():
     split_names = ["train", "val", "test"]
     split_results = []
     for name, part in zip(split_names, ranked + [None] * (3 - len(ranked))):
-        pairs = part_ppis[part] if part is not None else []
-        proteins = {p for pair in pairs for p in pair}
-        write_csv(pairs, f"{name}.csv")
+        rows = part_ppis[part] if part is not None else []
+        proteins = {p for row in rows for p in (row["protein1"], row["protein2"])}
+        write_ppi_csv(rows, f"{name}.csv")
         write_fasta(seqs, proteins, f"{name}.fasta")
-        print(f"{name}: {len(pairs)} PPIs, {len(proteins)} proteins", file=sys.stderr)
-        split_results.append({"name": name, "n_ppis": len(pairs), "n_proteins": len(proteins)})
+        print(f"{name}: {len(rows)} PPIs, {len(proteins)} proteins", file=sys.stderr)
+        split_results.append({"name": name, "n_ppis": len(rows), "n_proteins": len(proteins)})
 
     write_mqc(len(ppis), len(all_proteins), split_results)
+
 
 
 if __name__ == "__main__":

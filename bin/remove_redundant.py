@@ -15,8 +15,11 @@ PPIs are filtered so both partners must still be present.
 """
 
 import argparse
-import csv
+import os
 import sys
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from utils import read_fasta, read_ppis, write_fasta, write_ppi_csv
 
 
 def fasta_ids(path):
@@ -29,43 +32,8 @@ def fasta_ids(path):
     return ids
 
 
-def read_fasta(path):
-    seqs = {}
-    acc = None
-    parts = []
-    with open(path) as fh:
-        for line in fh:
-            line = line.rstrip()
-            if line.startswith(">"):
-                if acc:
-                    seqs[acc] = "".join(parts)
-                acc = line[1:].split()[0]
-                parts = []
-            elif line:
-                parts.append(line)
-    if acc and parts:
-        seqs[acc] = "".join(parts)
-    return seqs
-
-
-def read_ppis(path):
-    pairs = []
-    with open(path) as fh:
-        reader = csv.DictReader(fh)
-        for row in reader:
-            pairs.append((row["protein1"].strip(), row["protein2"].strip()))
-    return pairs
-
-
-def filter_ppis(pairs, keep):
-    return [(p1, p2) for p1, p2 in pairs if p1 in keep and p2 in keep]
-
-
-def write_csv(pairs, path):
-    with open(path, "w", newline="") as fh:
-        writer = csv.writer(fh)
-        writer.writerow(["protein1", "protein2"])
-        writer.writerows(pairs)
+def filter_ppis(rows, keep):
+    return [row for row in rows if row["protein1"] in keep and row["protein2"] in keep]
 
 
 def write_mqc(split_results):
@@ -116,12 +84,6 @@ def write_mqc(split_results):
                 fh.write(f"{r['name']}\t{r['n_proteins_nr']}\t{r['n_proteins_removed']}\n")
 
 
-def write_fasta(seqs, proteins, path):
-    with open(path, "w") as fh:
-        for p in sorted(proteins):
-            if p in seqs:
-                fh.write(f">{p}\n{seqs[p]}\n")
-
 
 def main():
     ap = argparse.ArgumentParser()
@@ -155,9 +117,9 @@ def main():
     val_ppis_nr   = filter_ppis(val_ppis,   val_prot_nr)
     test_ppis_nr  = filter_ppis(test_ppis,  test_prot_nr)
 
-    write_csv(train_ppis_nr, "train_nr.csv")
-    write_csv(val_ppis_nr,   "val_nr.csv")
-    write_csv(test_ppis_nr,  "test_nr.csv")
+    write_ppi_csv(train_ppis_nr, "train_nr.csv")
+    write_ppi_csv(val_ppis_nr,   "val_nr.csv")
+    write_ppi_csv(test_ppis_nr,  "test_nr.csv")
     write_fasta(train_seqs, train_prot_nr, "train_nr.fasta")
     write_fasta(val_seqs,   val_prot_nr,   "val_nr.fasta")
     write_fasta(test_seqs,  test_prot_nr,  "test_nr.fasta")
@@ -182,14 +144,14 @@ def main():
             "n_ppis_nr": len(val_ppis_nr),
             "n_proteins_nr": len(val_prot_nr),
             "n_ppis_removed": len(val_ppis) - len(val_ppis_nr),
-            "n_proteins_removed": len(set(val_seqs)) - len(val_prot_nr),
+            "n_proteins_removed": len(val_seqs) - len(val_prot_nr),
         },
         {
             "name": "test",
             "n_ppis_nr": len(test_ppis_nr),
             "n_proteins_nr": len(test_prot_nr),
             "n_ppis_removed": len(test_ppis) - len(test_ppis_nr),
-            "n_proteins_removed": len(set(test_seqs)) - len(test_prot_nr),
+            "n_proteins_removed": len(test_seqs) - len(test_prot_nr),
         },
     ])
 

@@ -10,30 +10,17 @@ Each entry in the NPZ file is keyed by protein ID and holds a 1-D float32 array.
 """
 
 import argparse
+import os
 import re
 import sys
 
 import numpy as np
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from utils import read_fasta
+
 _AA_VOCAB = "ACDEFGHIKLMNPQRSTVWY"
 _AA_IDX   = {aa: i for i, aa in enumerate(_AA_VOCAB)}
-
-
-def read_fasta(path):
-    seqs = {}
-    acc, parts = None, []
-    with open(path) as fh:
-        for line in fh:
-            line = line.rstrip()
-            if line.startswith(">"):
-                if acc:
-                    seqs[acc] = "".join(parts)
-                acc, parts = line[1:].split()[0], []
-            elif line:
-                parts.append(line)
-    if acc and parts:
-        seqs[acc] = "".join(parts)
-    return seqs
 
 
 def embed_one_hot(seqs):

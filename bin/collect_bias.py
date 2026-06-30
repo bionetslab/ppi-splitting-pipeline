@@ -6,7 +6,7 @@ Reads all *_bias_mqc.tsv files written by bias_analysis.py and emits
 bias_scatter_mqc.html for MultiQC.
 
 Each TSV has the header:
-    Split  MI(A;Y)  Related?  Detectability (Spearman ρ)
+    Split  NMI(A;Y)  Related?  Detectability (Spearman ρ)
 The attribute name is derived from the filename: {attribute}_bias_mqc.tsv
 """
 
@@ -29,7 +29,7 @@ _SPLIT_SYMBOLS = {
 
 
 def parse_tsv(path):
-    """Return list of (split, mi, detectability) from a bias TSV."""
+    """Return list of (split, nmi, detectability) from a bias TSV."""
     rows = []
     with open(path) as fh:
         for line in fh:
