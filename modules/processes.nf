@@ -214,6 +214,7 @@ process SAMPLE_NEGATIVES {
 process EMBED_SEQUENCES {
     publishDir "${params.outdir}/data"
     tag "embed"
+    label "process_gpu"
 
     input:
     path train_fasta
