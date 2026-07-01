@@ -1,62 +1,186 @@
-# PPI splitting pipeline
-Automated leakage-aware splitting of a given PPI dataset into train, validation, and test set.
+# PPI Splitting Pipeline
 
-## Process
+Automated leakage-aware splitting of a protein–protein interaction (PPI) dataset into train, validation, and test sets, with redundancy removal, negative sampling, embedding-based classification, and bias analysis.
 
-Obtain your PPI annotation file `ppis.csv` in the following format: 
+## Quick Start
+
+### 1. Install dependencies
+
+```bash
+conda env create -f environment.yml
+conda activate ppi-splitting-pipeline
+```
+
+### 2. Prepare your input
+
+Create a CSV file with at least two columns (`protein1`, `protein2`) containing UniProt accession IDs. Additional columns (e.g. STRING evidence scores) are preserved throughout the pipeline.
 
 ```
 protein1,protein2
 P45985,Q14315
 Q86TC9,P35609
+O14836-2,P12345
 ...
 ```
 
-1. The protein sequences `sequences.fasta` are obtained in FASTA format as one-liners (no line breaks):
-```
->P32234
-MSTILEKISAIESEMARTQKNKATSAHLGLLKAKLAKLRRELISPKGGGGGTGEAGFEVAKTGDARVGFVGFPSVGKSTLLSNLAGVYSEVAAYEFTTLTTVPGCIKYKGAKIQLLDLPGIIEGAKDGKGRGRQVIAVARTCNLIFMVLDCLKPLGHKKLLEHELEGFGIRLNKKPPNIYYKRKDKGGINLNSMVPQSELDTDLVKTILSEYKIHNADITLRYDATSDDLIDVIEGNRIYIPCIYLLNKIDQISIEELDVIYKIPHCVPISAHHHWNFDDLLELMWEYLRLQRIYTKPKGQLPDYNSPVVLHNERTSIEDFCNKLHRSIAKEFKYALVWGSSVKHQPQKVGIEHVLNDEDVVQIVKKV
->P30375
-MAVMAPRTLVLLLSGALALTQTWAGSHSMRYFSTSVSRPGRGEPRFIAVGYVDDTQFVRFDSDAASQRMEPRAPWIEQEGPEYWDRNTRNVKAHSQTDRVDLGTLRGYYNQSEDGSHTIQRMYGCDVGSDGRFLRGYQQDAYDGKDYIALNEDLRSWTAADMAAEITKRKWEAAHFAEQLRAYLEGTCVEWLRRHLENGKETLQRTDAPKTHMTHHAVSDHEAILRCWALSFYPAEITLTWQRDGEDQTQDTELVETRPAGDGTFQKWAAVVVPSGQEQRYTCHVQHEGLPEPLTLRWEPSSQPTIPIVGIIAGLVLFGAVIAGAVVAAVRWRRKSSDRKGGSYSQAASSDSAQGSDVSLTACKV
->P16209
-MAVMPPRTLLLLLSGALALTQTWAGSHSMRYFFTSVSRPGRGEPRFIAVGYVDDTQFVRFDSDAASQRMEPRAPWIEQEGPEYWDEETRSAKAHSQTDRVDLGTLRGYYNQSEDGSHTIQIMYGCDVGSDGRFLRGYRQDAYDGKDYIALNEDLRSWTAADMAAQITKRKWEAAHAAEQRRAYLEGTCVEWLRRYLENGKETLQRTDPPKTHMTHHPISDHEATLRCWALGFYPAEITLTWQRDGEDQTQDTELVETRPAGDGTFQKWAAVVVPSGEEQRYTCHVQHEGLPKPLTLRWEPSSQPTIPIVGIIAGLVLLGAVITGAVVAAVMWRRKSSDRKGGSYTQAASSDSAQGSDVSLTACKV
->P16211
-MAIMAPRTLLLLLSGALALTQTWAGSHSMRYFSTSVSRPGRGEPRFIAVGYVDDTQFVRFDSDAASQRMEPRTPWMEQEGPEYWDRETRSVKAHAQTNRVDLGTLRGYYNQSDGGSHTIQRMFGCDVGPDGRFLRGYEQHAYDGKDYIALNEDLRSWTAADMAAQITQRKWEAAGAAEQDRAYLEGLCVESLRRYLENGKETLQRTDAPKTHMTHHPVSDHEATLRCWALGFYPAEITLTWQRDGEDQTQDTELVETRPAGDGTFQKWAAVVVPSGKEQRYTCHVQHEGLPEPLTLRWELSSQPTIPIVGIIAGLVLLGAVITGAVVAAVMWRRRNSDRKGGSYSQAASNDSAQGSDVSLTACKV
+### 3. Run the pipeline
+
+```bash
+nextflow run main.nf --ppis ppis.csv --outdir results
 ```
 
-2. Sequence lengths are obtained for each protein for a length-normalized bitscore
+Key parameters (all optional):
 
+| Parameter | Default | Description |
+|---|---|---|
+| `--ppis` | `ppis.csv` | Input PPI CSV file |
+| `--outdir` | `results` | Output directory |
+| `--embedding_model` | `esm2` | Embedding model: `none` (one-hot), `esm2`, `prot_t5`, or path to a pre-computed `.npz` file |
+| `--edge_weight` | `normalized_bitscore` | BLAST edge weight for the similarity graph: `bitscore` or `normalized_bitscore` |
+| `--kahip_k` | `3` | Number of partitions (train / val / test) |
+| `--kahip_seed` | `1234` | KaHIP random seed |
+| `--kahip_preconfiguration` | `strong` | KaHIP mode: `strong`, `eco`, `fast`, `ultrafast` |
+| `--cdhit_identity` | `0.4` | CD-HIT sequence identity threshold for redundancy removal |
+| `--seed` | `42` | Random seed for negative sampling, classification, and bias analysis |
 
-3. All-against-all similarities are calculated with BLAST:
+Example with custom parameters:
 
-```{bash}
-makeblastdb -dbtype prot -in sequences.fasta
-blastp -query sequences.fasta -db mydb -outfmt "6 qseqid sseqid evalue bitscore"  -max_hsps 1 -out all_vs_all.tsv
+```bash
+nextflow run main.nf \
+    --ppis         string900_ppis.csv \
+    --outdir       results/string900 \
+    --embedding_model prot_t5 \
+    --kahip_k      3
 ```
 
-4. Make a similarity network and save it as METIS file for `KaHIP`. Edge weights can be specified as bitscore or length-normalized bitscore.
+### 4. View the report
 
-5. Install `KaHIP locally`
+Open `results/multiqc/multiqc_report.html` in a browser.
 
-6. Run `KaHIP's kaffpa` command on the METIS file
+---
 
-```{bash}
-kaffpa similarity.graph --seed=1234 --output_filename="partitioned_proteome.txt" --k=3 --preconfiguration=strong
+## Workflow
+
+```
+ppis.csv
+   │
+   ├─ FETCH_DATA ──────────────────────────────────── sequences.fasta
+   │       │                                           go_annotations.tsv
+   │       │                                           species.tsv
+   │       │
+   ├─ GET_LENGTHS ──────────────────────────────────── lengths.tsv
+   │
+   ├─ RUN_BLAST ────────────────────────────────────── all_vs_all.tsv
+   │
+   ├─ MAKE_METIS ───────────────────────────────────── similarity.graph
+   │                                                   node_mapping.tsv
+   ├─ RUN_KAHIP ────────────────────────────────────── partitioned_proteome.txt
+   │
+   ├─ SORT_PPIS ────────────────────────────────────── train/val/test .csv + .fasta
+   │
+   ├─ CDHIT (train↔val, train↔test)
+   │
+   ├─ REMOVE_REDUNDANT ─────────────────────────────── train_nr/val_nr/test_nr .csv + .fasta
+   │
+   ├─ SAMPLE_NEGATIVES ─────────────────────────────── train/val/test_balanced/test_realistic .csv
+   │
+   ├─ EMBED_SEQUENCES ──────────────────────────────── embeddings.npz
+   │
+   ├─ TRAIN_CLASSIFIER ─────────────────────────────── classifier_metrics_mqc.tsv
+   │
+   ├─ BIAS_ANALYSIS (×6–7 attributes, parallel) ────── *_bias_mqc.tsv
+   │
+   ├─ COLLECT_BIAS ─────────────────────────────────── bias_scatter_mqc.html
+   │
+   ├─ SIMILARITY_HEATMAP ───────────────────────────── similarity_heatmap_mqc.html
+   │
+   └─ MULTIQC ──────────────────────────────────────── multiqc_report.html
 ```
 
-7. Sort the PPIs into their partition blocks. PPIs with proteins belonging to different blocks are discarded. The largest resulting block is used as the training set, the second largest as the validation set, and the smallest as the test set.
+### Step descriptions
 
-8. Three sequence files are written for the proteins belonging to the training, validation, and test set, respectively. 
+**FETCH_DATA** — Queries UniProt for all proteins in the input CSV. Retrieves sequences (canonical + isoform-specific via the FASTA endpoint), GO annotations (biological process, molecular function, cellular component), and NCBI taxon IDs. Outputs `sequences.fasta`, `go_annotations.tsv`, and `species.tsv`.
 
-9. The sequence files are used to run CD-HIT to reduce redundancy between the blocks:
+**GET_LENGTHS** — Computes per-protein sequence lengths for length-normalised BLAST scores.
 
-```{bash}
-cd-hit-2d -i Intra_0.fasta -i2 Intra_1.fasta -o sim_intra0_intra_1.out -c 0.4 -n 2
-cd-hit-2d -i Intra_0.fasta -i2 Intra_2.fasta -o sim_intra0_intra_2.out -c 0.4 -n 2
-cd-hit-2d -i Intra_1.fasta -i2 Intra_2.fasta -o sim_intra1_intra_2.out -c 0.4 -n 2
+**RUN_BLAST** — Runs all-against-all BLASTp with `makeblastdb` + `blastp` to quantify pairwise sequence similarity.
+
+**MAKE_METIS** — Converts the BLAST results into a weighted similarity graph in METIS format. Edge weights are either raw bitscore or bitscore normalised by the geometric mean of protein lengths.
+
+**RUN_KAHIP** — Partitions the similarity graph into `k` parts using KaHIP's `kaffpa`. Proteins within the same partition are kept together; cross-partition PPIs are discarded. The largest partition becomes train, the second largest val, the smallest test.
+
+**SORT_PPIS** — Assigns each PPI to a split based on the KaHIP partition. Writes per-split CSV and FASTA files.
+
+**CDHIT** — Runs CD-HIT-2D between train↔val and train↔test to identify cross-split similar sequences.
+
+**REMOVE_REDUNDANT** — Removes proteins from val and test that are too similar to any training protein (above the CD-HIT identity threshold).
+
+**SAMPLE_NEGATIVES** — Samples random negative pairs for each split. Negatives are drawn such that each protein's degree distribution is approximately preserved. Produces a balanced test set (1:1 positive:negative) and a realistic test set (1:10 ratio).
+
+**EMBED_SEQUENCES** — Computes per-protein embeddings using the selected model:
+- `none` — 21-dimensional mean-pooled one-hot amino acid composition
+- `esm2` — ESM-2 650M (dimension 1280), mean-pooled over residues
+- `prot_t5` — ProtT5-XL (dimension 1024), mean-pooled over residues
+- A path to a pre-computed `.npz` file skips this step entirely.
+
+**TRAIN_CLASSIFIER** — Trains a Random Forest classifier on concatenated pair embeddings. Hyperparameters are tuned on the validation AUROC over 3 configurations (max_depth 5/10/30, max_samples 0.2), then the best model is retrained on train+val and evaluated on the balanced and realistic test sets.
+
+**BIAS_ANALYSIS** — Runs in parallel for each attribute, computing:
+- *Utility* — NMI(A; Y) = MI / √(H(A)·H(Y)): how much the attribute is correlated with the PPI label
+- *Detectability* — Spearman ρ of a Ridge regressor predicting the attribute from pair embeddings
+
+Attributes analysed:
+| Attribute | Description |
+|---|---|
+| `sequence_similarity` | BLASTp pident between the two proteins, normalised to [0, 1] |
+| `embedding_similarity` | Cosine similarity of the two individual protein embeddings |
+| `functional_relatedness_BP/MF/CC` | Jaccard similarity of GO term sets (biological process / molecular function / cellular component) |
+| `self_interactions` | 1 if both proteins are identical, 0 otherwise |
+| `same_species` | 1 if both proteins share the same NCBI taxon ID, 0 otherwise (only included if the dataset contains proteins from more than one species) |
+
+**COLLECT_BIAS** — Aggregates all per-attribute TSVs into a single interactive Plotly scatter plot (NMI vs detectability, coloured by attribute, shaped by split).
+
+**SIMILARITY_HEATMAP** — Plots a heatmap of pairwise BLASTp similarity between proteins in different splits, to visualise the degree of leakage.
+
+**MULTIQC** — Collects all `*_mqc.tsv` and `*_mqc.html` files into a single MultiQC report.
+
+---
+
+## Outputs
+
+```
+results/
+├── multiqc/
+│   └── multiqc_report.html       # Main report
+├── data/
+│   └── embeddings.npz            # Pre-computed embeddings (reusable)
+├── train.csv                     # Final labelled splits (positives + negatives)
+├── val.csv
+├── test_balanced.csv
+└── test_realistic.csv
 ```
 
-10. The redundant sequences are removed from the training, validation, and test set, respectively.
+---
 
-11. Negatives are sampled randomly for each block separately such that, e.g., all proteins occurring in training negative samples occur in the positive training samples, and so on. The negatives are sampled in a way that, in expectation, preserves the individual node degrees of positive samples, such that a protein has approximately the same number of positive and negative annotations.
+## Standalone STRING channel analysis
 
+To investigate which STRING evidence channels explain classifier performance differences between datasets, use the standalone script (not part of the Nextflow pipeline):
+
+```bash
+python bin/analyse_string_channels.py \
+    --train      results/train.csv \
+    --test       results/test_balanced.csv \
+    --embeddings results/data/embeddings.npz \
+    --out        string_channel_analysis.tsv
+```
+
+This fits a Ridge regressor (on positive pairs only) to predict each STRING evidence channel score from pair embeddings, and reports train and test Spearman ρ per channel. `combined_score` is excluded since it is derived from the individual channels.
+
+---
+
+## Requirements
+
+- [Nextflow](https://www.nextflow.io/) ≥ 23.10
+- Conda (for the environment) — or install the packages in `environment.yml` manually
+- Internet access for the initial UniProt fetch (subsequent runs use cached Nextflow work directories)
+- A GPU is recommended but not required for `esm2` and `prot_t5` embedding models
