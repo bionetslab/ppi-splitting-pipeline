@@ -61,6 +61,8 @@ Open `results/multiqc/multiqc_report.html` in a browser.
 
 ## Workflow
 
+![Pipeline overview](pipeline_overview.png)
+
 ```
 ppis.csv
    │
