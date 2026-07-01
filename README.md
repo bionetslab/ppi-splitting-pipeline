@@ -29,6 +29,32 @@ O14836-2,P12345
 nextflow run main.nf --ppis ppis.csv --outdir results
 ```
 
+If you have a GPU, additionally specify `-profile gpu`, which will submit only the embedding steps to the GPU:
+
+```bash
+nextflow run main.nf --ppis ppis.csv --outdir results -profile gpu -c my_config.config
+```
+
+Config example for an HPC with slurm and a dedicated GPU queue: https://nf-co.re/configs/daisybio/. Important part:
+
+```bash
+ profiles {
+     ...
+     gpu {
+            docker.runOptions       = '-u $(id -u):$(id -g) --gpus all'
+            apptainer.runOptions    = '--nv'
+            singularity.runOptions  = '--nv'
+        process{
+                withLabel:process_gpu {
+                    queue = 'shared-gpu'
+                    clusterOptions = '--qos=limitgpus --gpus=a40:1 --exclude compms-gpu-1.exbio.wzw.tum.de'
+                }
+            }
+        }
+        }
+} 
+```
+
 Key parameters (all optional):
 
 | Parameter | Default | Description |
