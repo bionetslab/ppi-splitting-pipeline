@@ -77,6 +77,14 @@ def write_mqc(results):
             "# pconfig:\n"
             "#     id: 'classifier_metrics_table'\n"
             "#     title: 'RF Classifier - Test Performance'\n"
+            "# headers:\n"
+            "#     AUROC:      {format: '{:.4f}'}\n"
+            "#     AUPRC:      {format: '{:.4f}'}\n"
+            "#     F1:         {format: '{:.4f}'}\n"
+            "#     MCC:        {format: '{:.4f}'}\n"
+            "#     Precision:  {format: '{:.4f}'}\n"
+            "#     Recall:     {format: '{:.4f}'}\n"
+            "#     Accuracy:   {format: '{:.4f}'}\n"
             "Sample\tAUROC\tAUPRC\tF1\tMCC\tPrecision\tRecall\tAccuracy\n"
         )
         cols = ["auroc", "auprc", "f1", "mcc", "precision", "recall", "accuracy"]

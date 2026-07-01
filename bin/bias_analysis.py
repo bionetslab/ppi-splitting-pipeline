@@ -216,6 +216,9 @@ def write_mqc(attribute, results):
             "# pconfig:\n"
             f"#     id: 'bias_{attribute}_table'\n"
             f"#     title: 'Bias: {attribute}'\n"
+            "# headers:\n"
+            "#     'NMI(A;Y)':                    {format: '{:.4f}'}\n"
+            "#     'Detectability (Spearman ρ)':   {format: '{:.4f}'}\n"
             "Split\tNMI(A;Y)\tRelated?\tDetectability (Spearman ρ)\n"
         )
         for split, r in results:
