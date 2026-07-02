@@ -43,24 +43,26 @@ def build_matrices(clusters_list, protein_to_cluster, ppi_rows):
         if c in cluster_to_idx:
             weights[cluster_to_idx[c]] += 1
 
-    cross_ppi = np.zeros((n, n), dtype=np.float64)
+    intra_ppi = np.zeros(n, dtype=np.float64)
+    cross_ppi = np.zeros((n, n), dtype=np.float64)  # upper triangle; cross_ppi[i,j] = count for i < j
     for row in ppi_rows:
         p1, p2 = row["protein1"], row["protein2"]
         c1 = protein_to_cluster.get(p1)
         c2 = protein_to_cluster.get(p2)
-        if c1 is None or c2 is None or c1 == c2:
+        if c1 is None or c2 is None:
             continue
         i, j = cluster_to_idx.get(c1), cluster_to_idx.get(c2)
         if i is None or j is None:
             continue
-        cross_ppi[i, j] += 1
-        cross_ppi[j, i] += 1
+        if i == j:
+            intra_ppi[i] += 1
+        else:
+            cross_ppi[min(i, j), max(i, j)] += 1
 
-    cross_ppi /= 2
-    return weights, cross_ppi
+    return weights, cross_ppi, intra_ppi
 
 
-def solve_ilp(clusters_list, n_ppis, cross_ppi, splits, names, epsilon, max_sec, solver):
+def solve_ilp(clusters_list, intra_ppi, cross_ppi, splits, names, epsilon, max_sec, solver):
     """
     Variables: x[s, c] ∈ {0,1}  — cluster c assigned to split s.
 
@@ -69,10 +71,11 @@ def solve_ilp(clusters_list, n_ppis, cross_ppi, splits, names, epsilon, max_sec,
         ∀c  (each cluster in exactly one split)
 
         (2) Σ_{i=1}^n x[s,c_i] * k(c_i,c_i) + Σ_{i=1}^{n-1}Σ_{j=i+1}^{n} x[s,c_i] * x[s,c_j] * k(c_i,c_j)
-        ≤ (1-ε) * f_s * Σ_{s=1}^S Σ_{i=1}^{n} Σ_{j=i}^{n} x[s,c_i] * x[s,c_j] * k(c_i,c_j)
+        ≥ (1-ε) * f_s * Σ_{s=1}^S Σ_{i=1}^{n} Σ_{j=i}^{n} x[s,c_i] * x[s,c_j] * k(c_i,c_j)
         ∀s  (minimum split size)
 
         with k(c_i,c_j) := number of PPIs between clusters c_i and c_j and f_s := fraction of PPIs in split s.
+        intra_ppi[i] = k(c_i,c_i); cross_ppi[i,j] = k(c_i,c_j) for i < j (upper triangle, actual counts).
 
     Objective (minimize): the data loss, i.e., PPIs between clusters assigned to different splits.
         min_X Σ_{i=1}^{n-1}Σ_{j=i+1}^{n} k(c_i,c_j) * (1 - Σ_{s=1}^S x[s,c_i] * x[s,c_j])
@@ -80,52 +83,43 @@ def solve_ilp(clusters_list, n_ppis, cross_ppi, splits, names, epsilon, max_sec,
     n_splits   = len(splits)
     n_clusters = len(clusters_list)
 
-    # Matrix variable with dimensionality number of splits (3) * number of clusters (n_clusters)
-    # showing which clusters are in which splits.
+    # Matrix variable: x[s, c] = 1 iff cluster c is assigned to split s.
     x = cp.Variable((n_splits, n_clusters), boolean=True)
 
     # Constraint 1: every cluster is in exactly one split.
     constraints = [cp.sum(x, axis=0) == np.ones(n_clusters)]
 
-    # Constraint 2: each split receives ≥ (f_s − ε) × n_ppis PPIs.
-    # LHS = Σ_i k(c_i,c_i)·x[s,i] + Σ_{i<j} k(c_i,c_j)·x[s,i]·x[s,j]
-    # The quadratic term x[s,i]·x[s,j] is linearised with z[s,k] ∈ {0,1}
-    # for each loss pair k=(i,j) where k(c_i,c_j) > 0:
+    # Constraint 2: each split receives ≥ (1-ε)·f_s of all selected PPIs.
+    #
+    # PPIs in split s = intra-cluster PPIs of clusters in s
+    #                 + cross-cluster PPIs where BOTH clusters are in s
+    #
+    # The product x[s,i]·x[s,j] (both clusters in same split) is linearised:
+    #   introduce z[s,k] ∈ {0,1} for each pair k=(i,j) with k(c_i,c_j) > 0
     #   z[s,k] ≤ x[s,i],  z[s,k] ≤ x[s,j],  z[s,k] ≥ x[s,i] + x[s,j] − 1
-    # k(c_i,c_j) = 2·cross_ppi[i,j]  (cross_ppi stores halved counts due to /=2).
-    # k(c_i,c_i) = intra-cluster PPIs per cluster, approximated by distributing
-    # total_intra = n_ppis − total_cross proportionally to cross-cluster involvement.
     loss_pairs = [
-        (e1, e2)
-        for e1 in range(n_clusters)
-        for e2 in range(e1 + 1, n_clusters)
-        if cross_ppi[e1, e2] > 0
+        (i, j)
+        for i in range(n_clusters)
+        for j in range(i + 1, n_clusters)
+        if cross_ppi[i, j] > 0
     ]
-
-    total_cross  = float(np.sum(cross_ppi))
-    total_intra  = max(0.0, float(n_ppis) - total_cross)
-    cross_row_sums = np.sum(cross_ppi, axis=1)
-    if total_cross > 0:
-        intra_ppi = total_intra * (cross_row_sums / total_cross)
-    else:
-        intra_ppi = np.full(n_clusters, total_intra / max(n_clusters, 1))
+    cross_counts = np.array([cross_ppi[i, j] for i, j in loss_pairs])  # actual PPI counts
 
     if loss_pairs:
         z = cp.Variable((n_splits, len(loss_pairs)), boolean=True)
-        for k, (e1, e2) in enumerate(loss_pairs):
+        for k, (i, j) in enumerate(loss_pairs):
             for s in range(n_splits):
                 constraints += [
-                    z[s, k] <= x[s, e1],
-                    z[s, k] <= x[s, e2],
-                    z[s, k] >= x[s, e1] + x[s, e2] - 1,
+                    z[s, k] <= x[s, i],
+                    z[s, k] <= x[s, j],
+                    z[s, k] >= x[s, i] + x[s, j] - 1,
                 ]
-        cross_counts   = np.array([2.0 * cross_ppi[e1, e2] for e1, e2 in loss_pairs])
-        z_sum          = cp.sum(z, axis=0)   # z_sum[k] = 1 iff pair k is co-assigned
-        total_assigned = total_intra + cross_counts @ z_sum
+        # total_assigned: intra PPIs (always kept) + co-assigned cross-cluster PPIs
+        z_sum          = cp.sum(z, axis=0)  # z_sum[k] = 1 iff pair k ends up in the same split
+        total_assigned = float(np.sum(intra_ppi)) + cross_counts @ z_sum
     else:
         z              = None
-        cross_counts   = np.array([])
-        total_assigned = total_intra  # no cross-cluster pairs; all intra always assigned
+        total_assigned = float(np.sum(intra_ppi))
 
     for s, frac in enumerate(splits):
         ppi_in_s = cp.sum(cp.multiply(intra_ppi, x[s]))
@@ -133,15 +127,14 @@ def solve_ilp(clusters_list, n_ppis, cross_ppi, splits, names, epsilon, max_sec,
             ppi_in_s = ppi_in_s + cross_counts @ z[s]
         constraints.append((1.0 - epsilon) * frac * total_assigned <= ppi_in_s)
 
-    # Objective: minimize discarded cross-cluster PPIs.
+    # Objective: minimise discarded cross-cluster PPIs.
     # Since each cluster is in exactly one split (constraint 1),
-    # cp.max(x[s,e1] − x[s,e2]) over s = 1 iff e1,e2 are in different splits, 0 otherwise.
-    # This is equivalent to k(c_i,c_j) · (1 − Σ_s x[s,c_i]·x[s,c_j]) from the docstring.
+    # cp.max(x[s,i] − x[s,j]) over s = 1 iff i and j are in different splits, 0 otherwise,
+    # which equals (1 − Σ_s x[s,i]·x[s,j]) from the docstring.
     if loss_pairs:
         dl_terms = [
-            2.0 * cross_ppi[e1, e2] * cp.max(cp.vstack([x[s, e1] - x[s, e2]
-                                                          for s in range(n_splits)]))
-            for (e1, e2) in loss_pairs
+            cross_ppi[i, j] * cp.max(cp.vstack([x[s, i] - x[s, j] for s in range(n_splits)]))
+            for (i, j) in loss_pairs
         ]
         objective = cp.Minimize(cp.sum(dl_terms))
     else:
@@ -259,19 +252,16 @@ def main():
     print(f"  {n_clusters:,} clusters; largest has {sizes[0]:,} proteins, "
           f"median {sizes[len(sizes)//2]:,}", file=sys.stderr)
 
-    if n_clusters > 1000:
-        print(f"  Warning: {n_clusters:,} clusters may make the ILP slow.", file=sys.stderr)
-
     print("Building problem matrices …", file=sys.stderr)
-    weights, cross_ppi = build_matrices(clusters_list, protein_to_cluster, ppi_rows)
-    n_loss_pairs = int(np.sum(cross_ppi > 0)) // 2
+    weights, cross_ppi, intra_ppi = build_matrices(clusters_list, protein_to_cluster, ppi_rows)
+    n_loss_pairs = int(np.sum(cross_ppi > 0))
     total_cross  = int(np.sum(cross_ppi))
     print(f"  {n_loss_pairs:,} cluster pairs with cross-cluster PPIs "
           f"({total_cross:,} PPIs at risk)", file=sys.stderr)
 
     print("Solving ILP …", file=sys.stderr)
     assignment = solve_ilp(
-        clusters_list, len(ppi_rows), cross_ppi,
+        clusters_list, intra_ppi, cross_ppi,
         splits, names, args.epsilon, args.max_sec, args.solver,
     )
     if assignment is None:
