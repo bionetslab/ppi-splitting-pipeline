@@ -34,16 +34,26 @@ include {
 workflow {
     ppis_ch = Channel.value(file(params.ppis, checkIfExists: true))
 
-    fetched        = FETCH_DATA(ppis_ch)
-    lengths        = GET_LENGTHS(fetched.sequences)
-    blast_out = RUN_BLAST(fetched.sequences)
+    if (params.sequences && params.go_annotations && params.species) {
+        sequences_ch      = Channel.value(file(params.sequences,      checkIfExists: true))
+        go_annotations_ch = Channel.value(file(params.go_annotations, checkIfExists: true))
+        species_ch        = Channel.value(file(params.species,        checkIfExists: true))
+    } else {
+        fetched           = FETCH_DATA(ppis_ch)
+        sequences_ch      = fetched.sequences
+        go_annotations_ch = fetched.go_annotations
+        species_ch        = fetched.species
+    }
+
+    lengths   = GET_LENGTHS(sequences_ch)
+    blast_out = RUN_BLAST(sequences_ch)
     metis_out = MAKE_METIS(blast_out, lengths)
     partition = RUN_KAHIP(metis_out.graph)
 
     sorted = SORT_PPIS(
         ppis_ch,
         partition,
-        fetched.sequences,
+        sequences_ch,
         metis_out.node_mapping
     )
 
@@ -71,7 +81,7 @@ workflow {
 
     clf      = TRAIN_CLASSIFIER(neg.train, neg.val, neg.test_balanced, neg.test_realistic, embeddings)
 
-    same_species_ch = fetched.species
+    same_species_ch = species_ch
         .splitCsv(header: true, sep: '\t')
         .map    { row -> row.taxon_id }
         .collect()
@@ -90,8 +100,8 @@ workflow {
         neg.test_realistic,
         blast_out,
         embeddings,
-        fetched.go_annotations,
-        fetched.species
+        go_annotations_ch,
+        species_ch
     )
     scatter  = COLLECT_BIAS(bias.mqc.collect())
     heatmap  = SIMILARITY_HEATMAP(nr.train_fasta, nr.val_fasta, nr.test_fasta, blast_out)
