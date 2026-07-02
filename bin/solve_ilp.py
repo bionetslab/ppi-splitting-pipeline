@@ -119,17 +119,19 @@ def solve_ilp(clusters_list, n_ppis, cross_ppi, splits, names, epsilon, max_sec,
                     z[s, k] <= x[s, e2],
                     z[s, k] >= x[s, e1] + x[s, e2] - 1,
                 ]
-        cross_counts = np.array([2.0 * cross_ppi[e1, e2] for e1, e2 in loss_pairs])
+        cross_counts   = np.array([2.0 * cross_ppi[e1, e2] for e1, e2 in loss_pairs])
+        z_sum          = cp.sum(z, axis=0)   # z_sum[k] = 1 iff pair k is co-assigned
+        total_assigned = total_intra + cross_counts @ z_sum
     else:
-        z            = None
-        cross_counts = np.array([])
+        z              = None
+        cross_counts   = np.array([])
+        total_assigned = total_intra  # no cross-cluster pairs; all intra always assigned
 
     for s, frac in enumerate(splits):
-        lo = max(0.0, frac - epsilon) * float(n_ppis)
         ppi_in_s = cp.sum(cp.multiply(intra_ppi, x[s]))
         if z is not None:
             ppi_in_s = ppi_in_s + cross_counts @ z[s]
-        constraints.append(lo <= ppi_in_s)
+        constraints.append((1.0 - epsilon) * frac * total_assigned <= ppi_in_s)
 
     # Objective: minimize discarded cross-cluster PPIs.
     # Since each cluster is in exactly one split (constraint 1),
