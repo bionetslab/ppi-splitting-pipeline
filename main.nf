@@ -19,8 +19,10 @@ include {
     MAKE_METIS
     RUN_KAHIP
     SORT_PPIS
-    CDHIT as CDHIT_TRAIN_VAL
-    CDHIT as CDHIT_TRAIN_TEST
+    CDHIT
+    CDHIT2D as CDHIT2D_TRAIN_VAL
+    CDHIT2D as CDHIT2D_TRAIN_TEST
+    SOLVE_ILP
     REMOVE_REDUNDANT
     SAMPLE_NEGATIVES
     EMBED_SEQUENCES
@@ -45,20 +47,24 @@ workflow {
         species_ch        = fetched.species
     }
 
-    lengths   = GET_LENGTHS(sequences_ch)
-    blast_out = RUN_BLAST(sequences_ch)
-    metis_out = MAKE_METIS(blast_out, lengths)
-    partition = RUN_KAHIP(metis_out.graph)
+    if (params.blast_results) {
+        blast_out = Channel.value(file(params.blast_results, checkIfExists: true))
+    } else {
+        blast_out = RUN_BLAST(sequences_ch)
+    }
 
-    sorted = SORT_PPIS(
-        ppis_ch,
-        partition,
-        sequences_ch,
-        metis_out.node_mapping
-    )
+    if (params.split_method == "ilp") {
+        clusters = CDHIT(sequences_ch)
+        sorted   = SOLVE_ILP(ppis_ch, sequences_ch, clusters)
+    } else {
+        lengths   = GET_LENGTHS(sequences_ch)
+        metis_out = MAKE_METIS(blast_out, lengths)
+        partition = RUN_KAHIP(metis_out.graph)
+        sorted    = SORT_PPIS(ppis_ch, partition, sequences_ch, metis_out.node_mapping)
+    }
 
-    sim_tv = CDHIT_TRAIN_VAL(sorted.train_fasta, sorted.val_fasta)
-    sim_tt = CDHIT_TRAIN_TEST(sorted.train_fasta, sorted.test_fasta)
+    sim_tv = CDHIT2D_TRAIN_VAL(sorted.train_fasta, sorted.val_fasta)
+    sim_tt = CDHIT2D_TRAIN_TEST(sorted.train_fasta, sorted.test_fasta)
 
     nr = REMOVE_REDUNDANT(
         sorted.train_ppis,

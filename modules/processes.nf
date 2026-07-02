@@ -130,6 +130,27 @@ process SORT_PPIS {
 }
 
 process CDHIT {
+    tag "cdhit"
+
+    input:
+    path fasta
+
+    output:
+    path "cdhit.clstr"
+
+    script:
+    """
+    cd-hit \\
+        -i  ${fasta} \\
+        -o  cdhit \\
+        -c  ${params.cdhit_identity} \\
+        -n  ${params.cdhit_wordsize} \\
+        -T  ${task.cpus} \\
+        -M  ${task.memory.toMega()}
+    """
+}
+
+process CDHIT2D {
     input:
     path db1_fasta
     path db2_fasta
@@ -147,6 +168,38 @@ process CDHIT {
         -n  ${params.cdhit_wordsize} \\
         -T  ${task.cpus} \\
         -M  4000
+    """
+}
+
+process SOLVE_ILP {
+    tag "solve_ilp"
+
+    input:
+    path ppis
+    path fasta
+    path clusters
+
+    output:
+    path "train.csv",   emit: train_ppis
+    path "val.csv",     emit: val_ppis
+    path "test.csv",    emit: test_ppis
+    path "train.fasta", emit: train_fasta
+    path "val.fasta",   emit: val_fasta
+    path "test.fasta",  emit: test_fasta
+    path "*_mqc.tsv",   emit: mqc
+
+    script:
+    """
+    solve_ilp.py \\
+        --ppis        ${ppis} \\
+        --fasta       ${fasta} \\
+        --clusters    ${clusters} \\
+        --train-split ${params.train_split} \\
+        --val-split   ${params.val_split} \\
+        --test-split  ${params.test_split} \\
+        --epsilon     ${params.ilp_epsilon} \\
+        --max-sec     ${params.ilp_max_sec} \\
+        ${params.ilp_solver ? "--solver ${params.ilp_solver}" : ""}
     """
 }
 

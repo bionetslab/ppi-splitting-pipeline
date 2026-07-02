@@ -10,7 +10,8 @@ OUT = "../pipeline_overview.png"
 
 C_IN    = '#455A64'
 C_FETCH = '#2E7D32'
-C_MAIN  = '#1565C0'
+C_MAIN  = '#1565C0'  # KaHIP path + common spine
+C_ILP   = '#AD1457'  # ILP path
 C_ANA   = '#E65100'
 C_HEAT  = '#00695C'
 C_OUT   = '#6A1B9A'
@@ -18,11 +19,39 @@ C_OUT   = '#6A1B9A'
 R   = 0.32
 LW  = 5.5
 LWb = 3.8
-MY  = 5.5   # main spine y
 
-fig, ax = plt.subplots(figsize=(26, 11))
-ax.set_xlim(0, 26)
-ax.set_ylim(0, 11)
+MY    = 6.5   # main spine y
+KH_Y  = 9.5   # KaHIP branch y
+ILP_Y = 3.5   # ILP branch y
+BA_Y  = 12.0  # bias analysis / heatmap y
+TC_Y  = 1.2   # train classifier y
+
+# x-coordinates
+X_PPIS    = 1.0
+X_FETCH   = 3.0
+X_BLAST   = 5.2
+
+X_LENGTHS = 7.2   # KaHIP branch
+X_METIS   = 9.4
+X_KAHIP   = 11.6
+X_SORT    = 13.8
+
+X_CDHIT   = 9.0   # ILP branch
+X_SOLVE   = 12.2
+
+X_CDHIT2D = 15.8  # common suffix
+X_REMOVE  = 17.8
+X_SAMPLE  = 19.8
+X_EMBED   = 21.8
+X_MULTIQC = 29.5
+
+X_BIAS    = 21.8
+X_COLLECT = 24.0
+X_CLF     = 24.0
+
+fig, ax = plt.subplots(figsize=(36, 14))
+ax.set_xlim(0, 36)
+ax.set_ylim(0, 14)
 ax.axis('off')
 fig.patch.set_facecolor('white')
 
@@ -33,8 +62,8 @@ def station(x, y, col):
 
 
 def lbl(x, y, text, col, side='above', sub=None):
-    yo  = (R + 0.18)  if side == 'above' else -(R + 0.18)
-    va  = 'bottom'    if side == 'above' else 'top'
+    yo = (R + 0.18) if side == 'above' else -(R + 0.18)
+    va = 'bottom'   if side == 'above' else 'top'
     ax.text(x, y + yo, text, ha='center', va=va,
             fontsize=18, fontweight='bold', color=col, linespacing=1.3)
     if sub:
@@ -60,83 +89,103 @@ def vcorner(x1, y1, x2, y2, col, lw=LW):
             solid_capstyle='round', solid_joinstyle='round', zorder=2)
 
 
-# ── main spine nodes ──────────────────────────────────────────────────────────
-# (x, label, colour, side, sublabel)
-nodes = [
-    (1.2,  'ppis.csv',            C_IN,    'below', 'input'),
-    (3.0,  'FETCH\nDATA',         C_FETCH, 'above', 'seqs · GO · species'),
-    (4.8,  'GET\nLENGTHS',        C_MAIN,  'below', None),
-    (6.6,  'RUN\nBLAST',          C_MAIN,  'above', 'all-vs-all BLASTp'),
-    (8.4,  'MAKE\nMETIS',         C_MAIN,  'below', None),
-    (10.2, 'RUN\nKAHIP',          C_MAIN,  'above', 'graph partition'),
-    (12.0, 'SORT\nPPIS',          C_MAIN,  'below', None),
-    (13.8, 'CDHIT\n×2',           C_MAIN,  'above', 'train↔val · train↔test'),
-    (15.6, 'REMOVE\nREDUNDANT',   C_MAIN,  'below', None),
-    (17.4, 'SAMPLE\nNEGATIVES',   C_MAIN,  'above', 'balanced · realistic'),
-    (19.2, 'EMBED\nSEQUENCES',    C_MAIN,  'below', 'esm2 · prot_t5 · …'),
-]
+# ── common prefix: ppis.csv → FETCH_DATA → RUN_BLAST ─────────────────────────
+track(X_PPIS,        MY, X_FETCH - R, MY, C_IN)
+track(X_FETCH - R,   MY, X_BLAST - R, MY, C_FETCH)
+track(X_BLAST - R,   MY, X_BLAST + R, MY, C_MAIN)
 
-# coloured spine segments
-track(1.2,       MY, 3.0 + R, MY, C_IN,    lw=LW)
-track(3.0 - R,   MY, 4.8 + R, MY, C_FETCH, lw=LW)
-track(4.8 - R,   MY, 19.2,    MY, C_MAIN,  lw=LW)
+station(X_PPIS,  MY, C_IN)
+lbl(X_PPIS,  MY, 'ppis.csv',    C_IN,    side='below', sub='input')
+station(X_FETCH, MY, C_FETCH)
+lbl(X_FETCH, MY, 'FETCH\nDATA', C_FETCH, side='above', sub='seqs · GO · species')
+station(X_BLAST, MY, C_MAIN)
+lbl(X_BLAST, MY, 'RUN\nBLAST',  C_MAIN,  side='below', sub='all-vs-all BLASTp')
 
-for x, txt, col, side, sub in nodes:
-    station(x, MY, col)
-    lbl(x, MY, txt, col, side, sub)
+# ── KaHIP branch (up) ─────────────────────────────────────────────────────────
+vcorner(X_BLAST + R, MY, X_LENGTHS - R, KH_Y, C_MAIN)
+track(X_LENGTHS - R, KH_Y, X_SORT + R, KH_Y, C_MAIN)
+hcorner(X_SORT + R, KH_Y, X_CDHIT2D, MY + R, C_MAIN)
 
-# ── SIMILARITY_HEATMAP — branches UP from CDHIT (13.8) ───────────────────────
-SH_X, SH_Y = 13.8, 8.8
-track(SH_X, MY + R, SH_X, SH_Y, C_HEAT, lw=LWb)
-station(SH_X, SH_Y, C_HEAT)
-lbl(SH_X, SH_Y, 'SIMILARITY\nHEATMAP', C_HEAT, side='above')
+for x, txt, sub, side in [
+    (X_LENGTHS, 'GET\nLENGTHS', None,             'above'),
+    (X_METIS,   'MAKE\nMETIS',  None,             'below'),
+    (X_KAHIP,   'RUN\nKAHIP',   'graph partition','above'),
+    (X_SORT,    'SORT\nPPIS',   None,             'below'),
+]:
+    station(x, KH_Y, C_MAIN)
+    lbl(x, KH_Y, txt, C_MAIN, side=side, sub=sub)
 
-# ── BIAS_ANALYSIS + COLLECT_BIAS — branch UP from EMBED_SEQUENCES (19.2) ─────
-BA_X, BA_Y = 19.2, 8.8
-CA_X, CA_Y = 21.2, 8.8
+ax.text((X_LENGTHS + X_SORT) / 2, KH_Y + 1.55,
+        'KaHIP path', ha='center', va='center',
+        fontsize=17, color=C_MAIN, fontstyle='italic', fontweight='bold')
 
-track(BA_X, MY + R, BA_X, BA_Y, C_ANA)
-station(BA_X, BA_Y, C_ANA)
-lbl(BA_X, BA_Y, 'BIAS\nANALYSIS ×6–7', C_ANA, side='above', sub='parallel')
+# ── ILP branch (down) ─────────────────────────────────────────────────────────
+vcorner(X_BLAST + R, MY, X_CDHIT - R, ILP_Y, C_ILP)
+track(X_CDHIT - R, ILP_Y, X_SOLVE + R, ILP_Y, C_ILP)
+hcorner(X_SOLVE + R, ILP_Y, X_CDHIT2D, MY - R, C_ILP)
 
-track(BA_X + R, BA_Y, CA_X, BA_Y, C_ANA)
-station(CA_X, CA_Y, C_ANA)
-lbl(CA_X, CA_Y, 'COLLECT\nBIAS', C_ANA, side='above', sub='scatter plot')
+for x, txt, sub, side in [
+    (X_CDHIT,  'CDHIT',      'cd-hit clusters', 'below'),
+    (X_SOLVE,  'SOLVE\nILP', None,               'above'),
+]:
+    station(x, ILP_Y, C_ILP)
+    lbl(x, ILP_Y, txt, C_ILP, side=side, sub=sub)
 
-# ── TRAIN_CLASSIFIER — branch DOWN from EMBED_SEQUENCES (19.2) ───────────────
-TC_X, TC_Y = 21.2, 2.0
-vcorner(19.2, MY - R, TC_X, TC_Y, C_ANA)
-station(TC_X, TC_Y, C_ANA)
-lbl(TC_X, TC_Y, 'TRAIN\nCLASSIFIER', C_ANA, side='below')
+ax.text((X_CDHIT + X_SOLVE) / 2, ILP_Y - 1.45,
+        'ILP path', ha='center', va='center',
+        fontsize=17, color=C_ILP, fontstyle='italic', fontweight='bold')
 
-# ── converge all branches to MULTIQC ─────────────────────────────────────────
-MQC_X = 24.2
+# ── common suffix: CDHIT2D → … → EMBED_SEQUENCES ─────────────────────────────
+track(X_CDHIT2D + R, MY, X_EMBED, MY, C_MAIN)
 
-# SIM_HEATMAP → right along y=SH_Y, then down to MY
-hcorner(SH_X + R, SH_Y, MQC_X, MY + R, C_OUT, lw=LWb)
+for x, txt, sub, side in [
+    (X_CDHIT2D, 'CDHIT2D\n×2',      'train↔val · train↔test', 'above'),
+    (X_REMOVE,  'REMOVE\nREDUNDANT', None,                      'below'),
+    (X_SAMPLE,  'SAMPLE\nNEGATIVES', 'balanced · realistic',    'above'),
+    (X_EMBED,   'EMBED\nSEQUENCES',  'esm2 · prot_t5 · …',     'below'),
+]:
+    station(x, MY, C_MAIN)
+    lbl(x, MY, txt, C_MAIN, side=side, sub=sub)
 
-# COLLECT_BIAS → right along y=CA_Y, then down to MY
-hcorner(CA_X + R, CA_Y, MQC_X, MY + R, C_OUT, lw=LW)
+# ── SIMILARITY_HEATMAP — branches UP from CDHIT2D ────────────────────────────
+track(X_CDHIT2D, MY + R, X_CDHIT2D, BA_Y, C_HEAT, lw=LWb)
+station(X_CDHIT2D, BA_Y, C_HEAT)
+lbl(X_CDHIT2D, BA_Y, 'SIMILARITY\nHEATMAP', C_HEAT, side='above')
 
-# TRAIN_CLASSIFIER → right along y=TC_Y, then up to MY
-hcorner(TC_X + R, TC_Y, MQC_X, MY - R, C_OUT, lw=LW)
+# ── BIAS_ANALYSIS + COLLECT_BIAS — branch UP from EMBED_SEQUENCES ─────────────
+track(X_BIAS, MY + R, X_BIAS, BA_Y, C_ANA)
+station(X_BIAS, BA_Y, C_ANA)
+lbl(X_BIAS, BA_Y, 'BIAS\nANALYSIS ×6–7', C_ANA, side='above', sub='parallel')
 
-# main spine continues right to MULTIQC
-track(19.2 + R, MY, MQC_X, MY, C_OUT, lw=LW)
+track(X_BIAS + R, BA_Y, X_COLLECT, BA_Y, C_ANA)
+station(X_COLLECT, BA_Y, C_ANA)
+lbl(X_COLLECT, BA_Y, 'COLLECT\nBIAS', C_ANA, side='above', sub='scatter plot')
 
-station(MQC_X, MY, C_OUT)
-lbl(MQC_X, MY, 'MULTIQC', C_OUT, side='above', sub='multiqc_report.html')
+# ── TRAIN_CLASSIFIER — branches DOWN from EMBED_SEQUENCES ─────────────────────
+vcorner(X_EMBED, MY - R, X_CLF, TC_Y, C_ANA)
+station(X_CLF, TC_Y, C_ANA)
+lbl(X_CLF, TC_Y, 'TRAIN\nCLASSIFIER', C_ANA, side='below')
 
-# ── legend (bottom-left) ──────────────────────────────────────────────────────
+# ── all branches converge to MULTIQC ─────────────────────────────────────────
+hcorner(X_CDHIT2D + R, BA_Y, X_MULTIQC, MY + R, C_OUT, lw=LWb)   # heatmap
+hcorner(X_COLLECT + R, BA_Y, X_MULTIQC, MY + R, C_OUT, lw=LW)     # collect bias
+hcorner(X_CLF + R,     TC_Y, X_MULTIQC, MY - R, C_OUT, lw=LW)     # classifier
+track(X_EMBED + R,     MY,   X_MULTIQC, MY,      C_OUT, lw=LW)    # main spine
+
+station(X_MULTIQC, MY, C_OUT)
+lbl(X_MULTIQC, MY, 'MULTIQC', C_OUT, side='above', sub='multiqc_report.html')
+
+# ── legend ────────────────────────────────────────────────────────────────────
 legend_items = [
     (C_IN,    'Input'),
     (C_FETCH, 'UniProt fetch'),
-    (C_MAIN,  'Core pipeline'),
+    (C_MAIN,  'KaHIP path'),
+    (C_ILP,   'ILP path'),
     (C_ANA,   'Analysis'),
     (C_HEAT,  'Similarity heatmap'),
     (C_OUT,   'Report'),
 ]
-lx0, ly0 = 0.4, 4.0
+lx0, ly0 = 0.4, 6.0
 ax.text(lx0, ly0 + 0.6, 'Legend', fontsize=18, fontweight='bold', color='#455A64')
 for i, (col, lab) in enumerate(legend_items):
     y = ly0 - i * 0.62
@@ -145,7 +194,7 @@ for i, (col, lab) in enumerate(legend_items):
             color=col, fontweight='bold')
 
 # ── title ─────────────────────────────────────────────────────────────────────
-ax.text(13.0, 10.4, 'PPI Splitting Pipeline', ha='center', va='center',
+ax.text(18.0, 13.3, 'PPI Splitting Pipeline', ha='center', va='center',
         fontsize=18, fontweight='bold', color='#1A237E')
 
 plt.tight_layout(pad=0.3)
