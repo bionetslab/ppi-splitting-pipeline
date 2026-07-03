@@ -1,37 +1,39 @@
 #!/usr/bin/env python3
 """
-Assign CD-HIT clusters to train/val/test splits by solving an ILP.
+Assign KaHIP partitions to train/val/test splits by solving an ILP.
 
-Reads a CD-HIT .clstr file plus a PPI CSV and protein FASTA.
-Clusters are assigned to splits to minimise discarded cross-cluster PPIs
-while keeping each split within epsilon of its target protein fraction.
+Reads a KaHIP partition file plus its node_mapping.tsv, a PPI CSV and a
+protein FASTA. Partitions ("clusters") are assigned to splits to minimise
+discarded cross-cluster PPIs while keeping each split within epsilon of its
+target protein fraction.
 """
 
 import argparse
-import re
 import sys
 from collections import defaultdict
 
 import cvxpy as cp
 import numpy as np
 
-from utils import read_fasta, read_ppis, write_fasta, write_ppi_csv
+from utils import (
+    read_fasta,
+    read_node_mapping,
+    read_partition,
+    read_ppis,
+    write_fasta,
+    write_ppi_csv,
+)
 
 
-def parse_clstr(path):
-    """Parse a CD-HIT .clstr file into {protein_id: cluster_id}."""
-    assignment = {}
-    cluster_id = -1
-    with open(path) as fh:
-        for line in fh:
-            line = line.strip()
-            if line.startswith(">Cluster"):
-                cluster_id += 1
-            else:
-                m = re.search(r">(\S+?)\.\.\.", line)
-                if m:
-                    assignment[m.group(1)] = cluster_id
-    return assignment
+def parse_kahip_partition(partition_path, node_mapping_path):
+    """Return {protein_id: cluster_id} from a KaHIP partition + node mapping."""
+    node_to_prot = read_node_mapping(node_mapping_path)
+    partition_list = read_partition(partition_path)
+    return {
+        node_to_prot[nid]: partition_list[nid - 1]
+        for nid in node_to_prot
+        if nid - 1 < len(partition_list)
+    }
 
 
 def build_matrices(clusters_list, protein_to_cluster, ppi_rows):
@@ -142,15 +144,22 @@ def solve_ilp(clusters_list, intra_ppi, cross_ppi, splits, names, epsilon, max_s
 
     problem = cp.Problem(objective, constraints)
 
-    kwargs = dict(time_limit=max_sec)
+    kwargs = dict(time_limit=max_sec, verbose=True)
     if solver:
         problem.solve(solver=solver, **kwargs)
     else:
         problem.solve(**kwargs)
 
-    if problem.status not in (cp.OPTIMAL, cp.OPTIMAL_INACCURATE):
+    if problem.status not in cp.settings.SOLUTION_PRESENT:
         print(f"Solver status: {problem.status}", file=sys.stderr)
         return None
+
+    if problem.status == cp.settings.USER_LIMIT:
+        print(
+            "Solver hit the time limit before proving optimality; "
+            "using the best incumbent found (suboptimal).",
+            file=sys.stderr,
+        )
 
     return {
         clusters_list[c]: names[s]
@@ -203,7 +212,8 @@ def main():
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--ppis",        required=True, help="PPI CSV (protein1,protein2)")
     ap.add_argument("--fasta",       required=True, help="Protein FASTA")
-    ap.add_argument("--clusters",    required=True, help="CD-HIT .clstr file")
+    ap.add_argument("--partition",    required=True, help="KaHIP partition file")
+    ap.add_argument("--node_mapping", required=True, help="KaHIP node_mapping.tsv (node_id -> protein_id)")
     ap.add_argument("--train-split", type=float, default=0.8)
     ap.add_argument("--val-split",   type=float, default=0.1)
     ap.add_argument("--test-split",  type=float, default=0.1)
@@ -220,17 +230,7 @@ def main():
     assert abs(sum(splits) - 1.0) < 1e-6, "Split fractions must sum to 1"
 
     print("Loading PPIs …", file=sys.stderr)
-    all_rows = read_ppis(args.ppis)
-    seen, ppi_rows = set(), []
-    for row in all_rows:
-        p1, p2 = row["protein1"], row["protein2"]
-        if p1 == p2:
-            continue
-        key = (min(p1, p2), max(p1, p2))
-        if key not in seen:
-            seen.add(key)
-            ppi_rows.append(row)
-    print(f"  {len(ppi_rows):,} unique PPIs", file=sys.stderr)
+    ppi_rows = read_ppis(args.ppis)
 
     print("Reading FASTA …", file=sys.stderr)
     seqs = read_fasta(args.fasta)
@@ -239,8 +239,8 @@ def main():
     )
     print(f"  {len(all_proteins):,} proteins with sequences", file=sys.stderr)
 
-    print("Parsing CD-HIT clusters …", file=sys.stderr)
-    protein_to_cluster = parse_clstr(args.clusters)
+    print("Parsing KaHIP partition …", file=sys.stderr)
+    protein_to_cluster = parse_kahip_partition(args.partition, args.node_mapping)
     protein_to_cluster = {p: protein_to_cluster[p] for p in all_proteins if p in protein_to_cluster}
 
     clusters_list = sorted(set(protein_to_cluster.values()))

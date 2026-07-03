@@ -82,10 +82,11 @@ process MAKE_METIS {
 
 process RUN_KAHIP {
     publishDir "${params.outdir}/similarities", mode: 'copy'
-    tag "kahip"
+    tag "kahip: k=${k}"
 
     input:
     path graph
+    val k
 
     output:
     path "partitioned_proteome.txt"
@@ -96,7 +97,7 @@ process RUN_KAHIP {
         ${graph} \\
         --seed=${params.kahip_seed} \\
         --output_filename=partitioned_proteome.txt \\
-        --k=${params.kahip_k} \\
+        --k=${k} \\
         --preconfiguration=${params.kahip_preconfiguration}
     """
 }
@@ -129,27 +130,6 @@ process SORT_PPIS {
     """
 }
 
-process CDHIT {
-    tag "cdhit"
-
-    input:
-    path fasta
-
-    output:
-    path "cdhit.clstr"
-
-    script:
-    """
-    cd-hit \\
-        -i  ${fasta} \\
-        -o  cdhit \\
-        -c  ${params.cdhit_identity} \\
-        -n  ${params.cdhit_wordsize} \\
-        -T  ${task.cpus} \\
-        -M  ${task.memory.toMega()}
-    """
-}
-
 process CDHIT2D {
     input:
     path db1_fasta
@@ -177,7 +157,9 @@ process SOLVE_ILP {
     input:
     path ppis
     path fasta
-    path clusters
+    path partition
+    path node_mapping
+    path gurobi_license
 
     output:
     path "train.csv",   emit: train_ppis
@@ -189,11 +171,14 @@ process SOLVE_ILP {
     path "*_mqc.tsv",   emit: mqc
 
     script:
+    def license_export = gurobi_license ? "export GRB_LICENSE_FILE=\$PWD/${gurobi_license}" : ""
     """
+    ${license_export}
     solve_ilp.py \\
-        --ppis        ${ppis} \\
-        --fasta       ${fasta} \\
-        --clusters    ${clusters} \\
+        --ppis          ${ppis} \\
+        --fasta         ${fasta} \\
+        --partition     ${partition} \\
+        --node_mapping  ${node_mapping} \\
         --train-split ${params.train_split} \\
         --val-split   ${params.val_split} \\
         --test-split  ${params.test_split} \\

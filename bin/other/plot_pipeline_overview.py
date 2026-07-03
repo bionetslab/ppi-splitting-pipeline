@@ -31,13 +31,14 @@ X_PPIS    = 1.0
 X_FETCH   = 3.0
 X_BLAST   = 5.2
 
-X_LENGTHS = 7.2   # KaHIP branch
+X_LENGTHS = 7.2   # common prefix: shared by both split methods
 X_METIS   = 9.4
-X_KAHIP   = 11.6
+
+X_KAHIP_A = 11.6  # KaHIP branch: RUN_KAHIP (k=3)
 X_SORT    = 13.8
 
-X_CDHIT   = 9.0   # ILP branch
-X_SOLVE   = 12.2
+X_KAHIP_B = 11.6  # ILP branch: RUN_KAHIP (k=100)
+X_SOLVE   = 13.8
 
 X_CDHIT2D = 15.8  # common suffix
 X_REMOVE  = 17.8
@@ -89,10 +90,10 @@ def vcorner(x1, y1, x2, y2, col, lw=LW):
             solid_capstyle='round', solid_joinstyle='round', zorder=2)
 
 
-# ── common prefix: ppis.csv → FETCH_DATA → RUN_BLAST ─────────────────────────
+# ── common prefix: ppis.csv → FETCH_DATA → RUN_BLAST → GET_LENGTHS → MAKE_METIS
 track(X_PPIS,        MY, X_FETCH - R, MY, C_IN)
 track(X_FETCH - R,   MY, X_BLAST - R, MY, C_FETCH)
-track(X_BLAST - R,   MY, X_BLAST + R, MY, C_MAIN)
+track(X_BLAST - R,   MY, X_METIS + R, MY, C_MAIN)
 
 station(X_PPIS,  MY, C_IN)
 lbl(X_PPIS,  MY, 'ppis.csv',    C_IN,    side='below', sub='input')
@@ -100,38 +101,40 @@ station(X_FETCH, MY, C_FETCH)
 lbl(X_FETCH, MY, 'FETCH\nDATA', C_FETCH, side='above', sub='seqs · GO · species')
 station(X_BLAST, MY, C_MAIN)
 lbl(X_BLAST, MY, 'RUN\nBLAST',  C_MAIN,  side='below', sub='all-vs-all BLASTp')
+station(X_LENGTHS, MY, C_MAIN)
+lbl(X_LENGTHS, MY, 'GET\nLENGTHS', C_MAIN, side='above')
+station(X_METIS, MY, C_MAIN)
+lbl(X_METIS, MY, 'MAKE\nMETIS', C_MAIN, side='below', sub='similarity graph')
 
-# ── KaHIP branch (up) ─────────────────────────────────────────────────────────
-vcorner(X_BLAST + R, MY, X_LENGTHS - R, KH_Y, C_MAIN)
-track(X_LENGTHS - R, KH_Y, X_SORT + R, KH_Y, C_MAIN)
+# ── KaHIP branch (up): RUN_KAHIP (k=3) → SORT_PPIS ───────────────────────────
+vcorner(X_METIS + R, MY, X_KAHIP_A - R, KH_Y, C_MAIN)
+track(X_KAHIP_A - R, KH_Y, X_SORT + R, KH_Y, C_MAIN)
 hcorner(X_SORT + R, KH_Y, X_CDHIT2D, MY + R, C_MAIN)
 
 for x, txt, sub, side in [
-    (X_LENGTHS, 'GET\nLENGTHS', None,             'above'),
-    (X_METIS,   'MAKE\nMETIS',  None,             'below'),
-    (X_KAHIP,   'RUN\nKAHIP',   'graph partition','above'),
-    (X_SORT,    'SORT\nPPIS',   None,             'below'),
+    (X_KAHIP_A, 'RUN\nKAHIP', 'graph partition · k=3', 'above'),
+    (X_SORT,    'SORT\nPPIS', None,                     'below'),
 ]:
     station(x, KH_Y, C_MAIN)
     lbl(x, KH_Y, txt, C_MAIN, side=side, sub=sub)
 
-ax.text((X_LENGTHS + X_SORT) / 2, KH_Y + 1.55,
+ax.text((X_KAHIP_A + X_SORT) / 2, KH_Y + 1.55,
         'KaHIP path', ha='center', va='center',
         fontsize=17, color=C_MAIN, fontstyle='italic', fontweight='bold')
 
-# ── ILP branch (down) ─────────────────────────────────────────────────────────
-vcorner(X_BLAST + R, MY, X_CDHIT - R, ILP_Y, C_ILP)
-track(X_CDHIT - R, ILP_Y, X_SOLVE + R, ILP_Y, C_ILP)
+# ── ILP branch (down): RUN_KAHIP (k=100) → SOLVE_ILP ─────────────────────────
+vcorner(X_METIS + R, MY, X_KAHIP_B - R, ILP_Y, C_ILP)
+track(X_KAHIP_B - R, ILP_Y, X_SOLVE + R, ILP_Y, C_ILP)
 hcorner(X_SOLVE + R, ILP_Y, X_CDHIT2D, MY - R, C_ILP)
 
 for x, txt, sub, side in [
-    (X_CDHIT,  'CDHIT',      'cd-hit clusters', 'below'),
-    (X_SOLVE,  'SOLVE\nILP', None,               'above'),
+    (X_KAHIP_B, 'RUN\nKAHIP',   'graph partition · k=100',    'below'),
+    (X_SOLVE,   'SOLVE\nILP',   'gurobi license optional',    'above'),
 ]:
     station(x, ILP_Y, C_ILP)
     lbl(x, ILP_Y, txt, C_ILP, side=side, sub=sub)
 
-ax.text((X_CDHIT + X_SOLVE) / 2, ILP_Y - 1.45,
+ax.text((X_KAHIP_B + X_SOLVE) / 2, ILP_Y - 1.45,
         'ILP path', ha='center', va='center',
         fontsize=17, color=C_ILP, fontstyle='italic', fontweight='bold')
 

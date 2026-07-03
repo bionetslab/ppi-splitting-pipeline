@@ -2,6 +2,7 @@
 """Shared I/O utilities for PPI pipeline scripts."""
 
 import csv
+import sys
 
 import numpy as np
 
@@ -42,12 +43,17 @@ def write_fasta(seqs, proteins, path):
 
 def read_ppis(path):
     """Return list of row dicts from a PPI CSV, stripping protein ID whitespace."""
-    rows = []
+    seen, rows = set(), []
     with open(path) as fh:
         for row in csv.DictReader(fh):
             row["protein1"] = row["protein1"].strip()
             row["protein2"] = row["protein2"].strip()
-            rows.append(row)
+            p1, p2 = row["protein1"], row["protein2"]
+            key = (min(p1, p2), max(p1, p2))
+            if key not in seen:
+                seen.add(key)
+                rows.append(row)
+    print(f"  {len(rows):,} unique PPIs", file=sys.stderr)
     return rows
 
 
@@ -58,6 +64,32 @@ def write_ppi_csv(rows, path):
         writer = csv.DictWriter(fh, fieldnames=fieldnames)
         writer.writeheader()
         writer.writerows(rows)
+
+
+
+# ---------------------------------------------------------------------------
+# KaHIP partition I/O
+# ---------------------------------------------------------------------------
+
+def read_node_mapping(path):
+    """Return {node_id (int, 1-indexed): protein_id}."""
+    mapping = {}
+    with open(path) as fh:
+        reader = csv.DictReader(fh, delimiter="\t")
+        for row in reader:
+            mapping[int(row["node_id"])] = row["protein_id"]
+    return mapping
+
+
+def read_partition(path):
+    """Return list where element i is the partition of node (i+1)."""
+    partitions = []
+    with open(path) as fh:
+        for line in fh:
+            line = line.strip()
+            if line:
+                partitions.append(int(line))
+    return partitions
 
 
 def read_labelled_csv(path):

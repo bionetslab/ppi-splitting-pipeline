@@ -6,6 +6,7 @@ params.outdir                 = "results"
 params.edge_weight            = "normalized_bitscore"  // "bitscore" or "normalized_bitscore"
 params.kahip_seed             = 1234
 params.kahip_k                = 3
+params.ilp_kahip_k            = 100
 params.kahip_preconfiguration = "strong"
 params.cdhit_identity         = 0.4
 params.cdhit_wordsize         = 2
@@ -19,7 +20,6 @@ include {
     MAKE_METIS
     RUN_KAHIP
     SORT_PPIS
-    CDHIT
     CDHIT2D as CDHIT2D_TRAIN_VAL
     CDHIT2D as CDHIT2D_TRAIN_TEST
     SOLVE_ILP
@@ -53,13 +53,17 @@ workflow {
         blast_out = RUN_BLAST(sequences_ch)
     }
 
+    lengths   = GET_LENGTHS(sequences_ch)
+    metis_out = MAKE_METIS(blast_out, lengths)
+
     if (params.split_method == "ilp") {
-        clusters = CDHIT(sequences_ch)
-        sorted   = SOLVE_ILP(ppis_ch, sequences_ch, clusters)
+        gurobi_license_ch = params.gurobi_license
+            ? Channel.value(file(params.gurobi_license, checkIfExists: true))
+            : Channel.value([])
+        partition = RUN_KAHIP(metis_out.graph, params.ilp_kahip_k)
+        sorted    = SOLVE_ILP(ppis_ch, sequences_ch, partition, metis_out.node_mapping, gurobi_license_ch)
     } else {
-        lengths   = GET_LENGTHS(sequences_ch)
-        metis_out = MAKE_METIS(blast_out, lengths)
-        partition = RUN_KAHIP(metis_out.graph)
+        partition = RUN_KAHIP(metis_out.graph, params.kahip_k)
         sorted    = SORT_PPIS(ppis_ch, partition, sequences_ch, metis_out.node_mapping)
     }
 

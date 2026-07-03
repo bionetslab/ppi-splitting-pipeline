@@ -9,36 +9,12 @@ Rules:
 """
 
 import argparse
-import csv
 import os
 import sys
 from collections import defaultdict
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from utils import read_fasta, read_ppis, write_fasta, write_ppi_csv
-
-
-def read_node_mapping(path):
-    """Return {node_id (int, 1-indexed): protein_id}."""
-    mapping = {}
-    with open(path) as fh:
-        reader = csv.DictReader(fh, delimiter="\t")
-        for row in reader:
-            mapping[int(row["node_id"])] = row["protein_id"]
-    return mapping
-
-
-def read_partition(path):
-    """Return list where element i is the partition of node (i+1)."""
-    partitions = []
-    with open(path) as fh:
-        for line in fh:
-            line = line.strip()
-            if line:
-                partitions.append(int(line))
-    return partitions
-
-
+from utils import read_fasta, read_node_mapping, read_partition, read_ppis, write_fasta, write_ppi_csv
 
 
 def write_mqc(n_input, n_proteins_input, split_results):
