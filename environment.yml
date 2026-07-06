@@ -14,10 +14,10 @@ dependencies:
   - numpy
   - matplotlib
   - plotly
-  - cvxpy
   - pyscipopt
   - pip:
     - torch
     - transformers
     - sentencepiece
     - protobuf
+    - cvxpy[GUROBI]
