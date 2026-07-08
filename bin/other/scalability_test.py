@@ -168,7 +168,7 @@ def main():
     ap.add_argument("--ppis",              required=True, help="PPI CSV (protein1,protein2)")
     ap.add_argument("--blast",             required=True, help="BLAST all-vs-all TSV (qseqid sseqid evalue bitscore …)")
     ap.add_argument("--sizes",             nargs="+", type=int,
-                    default=[1_000, 5_000, 10_000, 50_000, 100_000],
+                    default=[6_000, 7_000, 8_000, 9_000, 10_000],
                     help="PPI subsample sizes to benchmark")
     ap.add_argument("--k",                 type=int, default=10,
                     help="Number of partitions for kaffpa (default: 10)")

@@ -1,14 +1,19 @@
 #!/usr/bin/env python3
 """
-Sample negative PPI pairs and write combined labelled CSVs.
+Sample negative PPI pairs for a single split and write a combined labelled CSV.
 
-train.csv / val.csv / test_balanced.csv — 50/50, degree-preserving in expectation:
-  Both endpoints drawn from a stub pool (protein p appears degree(p) times).
+Degree-weighted (default): both endpoints drawn from a stub pool (protein p
+appears degree(p) times), preserving degree in expectation. Used for the
+50/50 train/val/test_balanced splits.
 
-test_realistic.csv — 1:10, uniform random:
-  10 × len(positives) negatives, endpoints drawn uniformly at random.
+Uniform (--uniform): endpoints drawn uniformly at random. Used for the
+1:10 test_realistic split.
 
-All output files have columns: protein1, protein2, label  (1 = positive, 0 = negative).
+Output CSV has columns: protein1, protein2, label  (1 = positive, 0 = negative).
+
+Per-split fan-out (train/val/test_balanced/test_realistic) is handled by
+Nextflow channel logic, not by this script; each invocation samples exactly
+one split.
 """
 
 import argparse
@@ -46,7 +51,7 @@ def sample_negatives(rows, ratio=1, degree_weighted=True, seed=42):
     if not rows:
         return []
     pool = _stub_pool(rows) if degree_weighted else sorted({p for r in rows for p in (r["protein1"], r["protein2"])})
-    target = ratio * len(rows)
+    target = int(ratio * len(rows))
     negatives = set()
     for _ in range(target * 100):
         if len(negatives) >= target:
@@ -80,8 +85,10 @@ def write_combined(pos_rows, negatives, path):
             writer.writerow(out)
 
 
-def write_mqc(split_results, n_random_test):
-    with open("sample_negatives_gs_mqc.tsv", "w") as fh:
+def write_mqc(split_name, n_positives, n_negatives, gs_out, bar_out):
+    # Sharing the same 'id' across all four splits' files lets MultiQC merge
+    # them into one combined general-stats table / bar plot.
+    with open(gs_out, "w") as fh:
         fh.write(
             "# id: 'neg_generalstats'\n"
             "# plot_type: 'generalstats'\n"
@@ -93,66 +100,49 @@ def write_mqc(split_results, n_random_test):
             "#         scale: 'Blues'\n"
             "#     - n_negatives:\n"
             "#         title: 'Negatives'\n"
-            "#         description: 'Degree-preserving (in expectation) negatives, 50/50 balanced'\n"
+            "#         description: 'Sampled negatives for the split'\n"
             "#         format: '{:,.0f}'\n"
             "#         scale: 'Oranges'\n"
-            "#     - n_negatives_random:\n"
-            "#         title: 'Negatives (random)'\n"
-            "#         description: 'Randomly sampled test negatives, 1:10 ratio'\n"
-            "#         format: '{:,.0f}'\n"
-            "#         scale: 'Reds'\n"
-            "Sample\tn_positives\tn_negatives\tn_negatives_random\n"
+            "Sample\tn_positives\tn_negatives\n"
+            f"{split_name}\t{n_positives}\t{n_negatives}\n"
         )
-        for r in split_results:
-            rand = n_random_test if r["name"] == "test" else ""
-            fh.write(f"{r['name']}\t{r['n_positives']}\t{r['n_negatives']}\t{rand}\n")
 
-    with open("sample_negatives_bar_mqc.tsv", "w") as fh:
+    with open(bar_out, "w") as fh:
         fh.write(
             "# id: 'pos_neg_bar'\n"
             "# section_name: 'Positive vs Negative Pairs'\n"
-            "# description: 'Positive and degree-preserving (in expectation) negative pairs per split (50/50 balanced).'\n"
+            "# description: 'Positive and sampled negative pairs per split.'\n"
             "# plot_type: 'bargraph'\n"
             "# pconfig:\n"
             "#     id: 'pos_neg_bar_plot'\n"
             "#     title: 'Positive vs Negative PPIs per Split'\n"
             "#     ylab: '# Pairs'\n"
             "Sample\tPositives\tNegatives\n"
+            f"{split_name}\t{n_positives}\t{n_negatives}\n"
         )
-        for r in split_results:
-            fh.write(f"{r['name']}\t{r['n_positives']}\t{r['n_negatives']}\n")
 
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--train", required=True)
-    ap.add_argument("--val",   required=True)
-    ap.add_argument("--test",  required=True)
-    ap.add_argument("--seed",  type=int, default=42)
+    ap.add_argument("--positives",  required=True, help="Input CSV of positive PPIs for this split")
+    ap.add_argument("--output",     required=True, help="Output combined CSV path")
+    ap.add_argument("--split-name", required=True, help="Split label, e.g. train/val/test_balanced/test_realistic")
+    ap.add_argument("--ratio",      type=float, default=1.0, help="negatives = ratio * positives")
+    ap.add_argument("--uniform", action="store_true",
+                     help="Draw negative endpoints uniformly at random instead of degree-weighted")
+    ap.add_argument("--seed", type=int, default=42)
     args = ap.parse_args()
 
-    split_results = []
-    for name, src, out in [
-        ("train", args.train, "train.csv"),
-        ("val",   args.val,   "val.csv"),
-        ("test",  args.test,  "test_balanced.csv"),
-    ]:
-        rows = read_ppis(src)
-        negs = sample_negatives(rows, seed=args.seed)
-        write_combined(rows, negs, out)
-        print(f"{name}: {len(rows)} positives → {len(negs)} negatives sampled", file=sys.stderr)
-        split_results.append({
-            "name": name,
-            "n_positives": len(rows),
-            "n_negatives": len(negs),
-        })
+    rows = read_ppis(args.positives)
+    negs = sample_negatives(rows, ratio=args.ratio, degree_weighted=not args.uniform, seed=args.seed)
+    write_combined(rows, negs, args.output)
+    print(f"{args.split_name}: {len(rows)} positives → {len(negs)} negatives sampled", file=sys.stderr)
 
-    test_rows = read_ppis(args.test)
-    random_negs = sample_negatives(test_rows, ratio=10, degree_weighted=False, seed=args.seed)
-    write_combined(test_rows, random_negs, "test_realistic.csv")
-    print(f"test (random 1:10): {len(test_rows)} positives → {len(random_negs)} negatives sampled", file=sys.stderr)
-
-    write_mqc(split_results, n_random_test=len(random_negs))
+    write_mqc(
+        args.split_name, len(rows), len(negs),
+        gs_out=f"{args.split_name}_gs_mqc.tsv",
+        bar_out=f"{args.split_name}_bar_mqc.tsv",
+    )
 
 
 if __name__ == "__main__":

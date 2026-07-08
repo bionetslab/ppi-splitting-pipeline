@@ -143,7 +143,7 @@ ppis.csv
 
 **REMOVE_REDUNDANT** — Removes proteins from val and test that are too similar to any training protein (above the CD-HIT identity threshold).
 
-**SAMPLE_NEGATIVES** — Samples random negative pairs for each split. Negatives are drawn such that each protein's degree distribution is approximately preserved. Produces a balanced test set (1:1 positive:negative) and a realistic test set (1:10 ratio).
+**SAMPLE_NEGATIVES** — Samples random negative pairs for each split. Negatives are drawn such that each protein's degree distribution is approximately preserved. Produces a balanced test set (1:1 positive:negative) and a realistic test set (1:10 ratio). An ILP-based alternative is available via `--negative_sampling_method ilp`; see [Bias-aware ILP negative sampling](#bias-aware-ilp-negative-sampling-optional) below.
 
 **EMBED_SEQUENCES** — Computes per-protein embeddings using the selected model:
 - `none` — 21-dimensional mean-pooled one-hot amino acid composition
@@ -187,6 +187,62 @@ results/
 ├── test_balanced.csv
 └── test_realistic.csv
 ```
+
+---
+
+## Bias-aware ILP negative sampling (optional)
+
+`SAMPLE_NEGATIVES_ILP` is an opt-in alternative to `SAMPLE_NEGATIVES` that chooses
+the negative set by solving a mixed-integer linear program (CVXPY), rather than
+sampling at random. It matches per-protein per-taxon interaction counts,
+self-interaction counts, and mean GO-BP Jaccard similarity between the positive
+and negative sets, while preferring high-confidence non-interactions when a
+confidence score is supplied. `bin/sample_negatives_ilp.py` samples exactly one
+split per invocation; the process runs once per split (train, val,
+test_balanced, test_realistic) and Nextflow executes all four in parallel.
+Together they produce the same four output files (`train.csv`, `val.csv`,
+`test_balanced.csv`, `test_realistic.csv`) as the default sampler, so all
+downstream steps are unaffected. See `sample_negatives_SPEC.md` and
+`ppi_negative_sampling_ilp.tex` for the full mathematical derivation.
+
+Enable it with:
+
+```bash
+nextflow run main.nf --negative_sampling_method ilp
+```
+
+| Parameter | Default | Description |
+|---|---|---|
+| `--negative_sampling_method` | `default` | `default` (random) or `ilp` |
+| `--candidate_network` | `null` | Optional CSV (`protein1,protein2[,w]`) restricting the candidate pool, e.g. a Negatome database or a topology-driven pool. Required for large protein universes (see below). |
+| `--neg_ilp_alpha_confidence` / `--neg_ilp_alpha_bias` | `0.3` / `0.7` | Trade-off between confidence loss and bias matching (must sum to 1) |
+| `--neg_ilp_lambda_degree` | `0.6` | Weight of the per-protein (per-taxon, in `unified` mode) degree-matching term |
+| `--neg_ilp_lambda_taxon_pair` | `0.0` | Weight of the global taxon-pair matching term (`split` mode only) |
+| `--neg_ilp_lambda_self_loop` | `0.1` | Weight of the self-interaction count matching term |
+| `--neg_ilp_lambda_jaccard` | `0.3` | Weight of the mean GO-BP Jaccard matching term |
+| `--neg_ilp_degree_bias_mode` | `unified` | `unified` (single per-protein-per-taxon term) or `split` (separate per-protein degree and taxon-pair terms) |
+| `--neg_ilp_solver` | `auto` | `auto`, `gurobi`, `scip`, or `highs`. `auto` tries Gurobi first, then falls back to an open-source solver. |
+| `--neg_ilp_time_limit` | `3600` | Solver time limit in seconds |
+| `--neg_ilp_mip_gap` | `0.01` | Solver MIP gap tolerance |
+| `--gurobi_license` | `gurobi.lic` | Path to a Gurobi license file, only used if the `gurobi` solver is selected |
+
+The active `--neg_ilp_lambda_*` weights (for the chosen `degree_bias_mode`) must
+sum to 1; a mismatch is auto-rescaled with a warning unless the script is run
+with `--strict-weights` directly (not exposed as a pipeline parameter).
+
+For Gurobi, install it yourself and point `--gurobi_license` at your license
+file (`pip install gurobipy` is already pulled in by `environment.yml`). With
+no usable Gurobi license, `auto` falls back to SCIP or HiGHS, both installed
+by `environment.yml`.
+
+The default candidate pool is the full upper-triangle complement of the
+positive set, which is quadratic in the number of proteins (~1.1×10⁸ pairs for
+15k proteins). For large datasets, supply `--candidate_network` to restrict
+the pool, or the script will raise a clear error before attempting to build it.
+
+Each split's process writes its own `<split>_mqc.tsv` diagnostics row and,
+optionally, `<split>_residuals_mqc.tsv` (per-protein degree residuals); MultiQC
+picks up all of them.
 
 ---
 

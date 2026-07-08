@@ -11,7 +11,16 @@ import urllib.request
 
 UNIPROT_URL      = "https://rest.uniprot.org/uniprotkb/stream"
 UNIPROT_FASTA_URL = "https://rest.uniprot.org/uniprotkb/{acc}.fasta"
+UNIPARC_URL      = "https://rest.uniprot.org/uniparc/search"
 BATCH_SIZE = 100
+
+
+class InvalidAccessionBatch(Exception):
+    """Raised when UniProt rejects a whole batch (HTTP 400) because it contains
+    an accession that isn't valid UniProtKB format, e.g. a UniParc-only ID such
+    as a raw EMBL/GenBank protein_id. Not transient, so callers should not retry
+    the same batch and should instead fall back to per-accession requests.
+    """
 
 
 def _ssl_context():
@@ -82,6 +91,18 @@ def fetch_batch(accessions, retries=3):
         try:
             with urllib.request.urlopen(req, timeout=120, context=_ssl_context()) as resp:
                 return resp.read().decode("utf-8")
+        except urllib.error.HTTPError as exc:
+            if exc.code == 400:
+                # UniProt rejects the entire OR-joined query if any accession in
+                # it isn't valid UniProtKB format (e.g. a UniParc-only ID like a
+                # raw EMBL/GenBank protein_id). Retrying won't help.
+                raise InvalidAccessionBatch(str(exc)) from exc
+            if attempt < retries - 1:
+                time.sleep(2 ** attempt)
+            else:
+                raise RuntimeError(
+                    f"Failed to fetch batch after {retries} attempts: {exc}"
+                ) from exc
         except urllib.error.URLError as exc:
             if attempt < retries - 1:
                 time.sleep(2 ** attempt)
@@ -89,6 +110,39 @@ def fetch_batch(accessions, retries=3):
                 raise RuntimeError(
                     f"Failed to fetch batch after {retries} attempts: {exc}"
                 ) from exc
+
+
+def fetch_uniparc_entry(acc, retries=3):
+    """Look up an accession UniProtKB doesn't recognize (e.g. a raw EMBL/GenBank
+    protein_id) via UniParc's cross-reference index instead.
+
+    Returns (sequence, taxon_id), or None if UniParc has no record either.
+    UniParc is a sequence archive, not a curated database, so it has no GO
+    annotations - callers only get sequence + taxonomy back for these IDs.
+    """
+    params = urllib.parse.urlencode({
+        "query": f"dbid:{acc}",
+        "format": "tsv",
+        "fields": "organism_id,sequence",
+    })
+    req = urllib.request.Request(f"{UNIPARC_URL}?{params}")
+    for attempt in range(retries):
+        try:
+            with urllib.request.urlopen(req, timeout=30, context=_ssl_context()) as resp:
+                lines = resp.read().decode("utf-8").strip().splitlines()
+                if len(lines) < 2:
+                    return None
+                taxon_id, seq = lines[1].split("\t")
+                return seq.strip(), taxon_id.strip()
+        except urllib.error.HTTPError as exc:
+            if exc.code == 400:
+                return None
+            if attempt < retries - 1:
+                time.sleep(2 ** attempt)
+        except urllib.error.URLError:
+            if attempt < retries - 1:
+                time.sleep(2 ** attempt)
+    return None
 
 
 def _parse_go(raw):
@@ -130,9 +184,28 @@ def main():
 
     # Fetch by canonical accession; UniProt ignores isoform suffixes in queries.
     canon_seqs, canon_go, canon_species = {}, {}, {}
+    uniparc_only = []  # accessions UniProtKB rejects outright; resolved via UniParc below
     for i in range(0, len(canonicals), BATCH_SIZE):
         batch = canonicals[i : i + BATCH_SIZE]
-        seqs, go, species = parse_batch(fetch_batch(batch))
+        try:
+            seqs, go, species = parse_batch(fetch_batch(batch))
+        except InvalidAccessionBatch:
+            print(
+                f"  Batch rejected (contains an accession UniProt doesn't recognize); "
+                f"retrying the {len(batch)} accessions individually to isolate it...",
+                file=sys.stderr,
+            )
+            seqs, go, species = {}, {}, {}
+            for acc in batch:
+                try:
+                    s, g, sp = parse_batch(fetch_batch([acc]))
+                    seqs.update(s)
+                    go.update(g)
+                    species.update(sp)
+                except InvalidAccessionBatch:
+                    print(f"Failed to fetch {acc}; falling back to UniParc...", file=sys.stderr)
+                    uniparc_only.append(acc)
+                time.sleep(0.1)
         canon_seqs.update(seqs)
         canon_go.update(go)
         canon_species.update(species)
@@ -143,13 +216,26 @@ def main():
         if i + BATCH_SIZE < len(canonicals):
             time.sleep(0.5)
 
+    if uniparc_only:
+        print(
+            f"Falling back to UniParc for {len(uniparc_only)} accession(s) not valid in "
+            f"UniProtKB (sequence + taxonomy only, no GO annotations available there): "
+            f"{sorted(uniparc_only)}",
+            file=sys.stderr,
+        )
+        for acc in uniparc_only:
+            result = fetch_uniparc_entry(acc)
+            if result:
+                canon_seqs[acc], canon_species[acc] = result
+            time.sleep(0.2)
+
     # Expand results back to all original IDs; GO and species come from canonical entry.
     all_seqs, all_go, all_species = {}, {}, {}
     for canon, originals in canonical_map.items():
         for acc in originals:
             if canon in canon_seqs:
                 all_seqs[acc]    = canon_seqs[canon]
-                all_go[acc]      = canon_go[canon]
+                all_go[acc]      = canon_go.get(canon, {"BP": set(), "MF": set(), "CC": set()})
                 all_species[acc] = canon_species.get(canon, "")
 
     # Isoforms may have distinct sequences — fetch each individually.
