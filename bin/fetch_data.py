@@ -75,6 +75,17 @@ def fetch_isoform_sequence(acc, retries=3):
     return None
 
 
+_STREAM_ERROR_MARKER = "error encountered when streaming data"
+
+
+def _is_stream_error(text: str) -> bool:
+    """True if `text` is UniProt's own error page for a /stream request that
+    failed server-side after the response had already started (HTTP 200), so
+    it never raises HTTPError/URLError and would otherwise look like a
+    successful-but-unparseable TSV response."""
+    return _STREAM_ERROR_MARKER in text.lower()
+
+
 def fetch_batch(accessions, retries=3):
     """Batch request returning accession, sequence, GO IDs, and taxon ID as TSV.
 
@@ -90,7 +101,7 @@ def fetch_batch(accessions, retries=3):
     for attempt in range(retries):
         try:
             with urllib.request.urlopen(req, timeout=120, context=_ssl_context()) as resp:
-                return resp.read().decode("utf-8")
+                text = resp.read().decode("utf-8")
         except urllib.error.HTTPError as exc:
             if exc.code == 400:
                 # UniProt rejects the entire OR-joined query if any accession in
@@ -99,17 +110,28 @@ def fetch_batch(accessions, retries=3):
                 raise InvalidAccessionBatch(str(exc)) from exc
             if attempt < retries - 1:
                 time.sleep(2 ** attempt)
-            else:
-                raise RuntimeError(
-                    f"Failed to fetch batch after {retries} attempts: {exc}"
-                ) from exc
+                continue
+            raise RuntimeError(
+                f"Failed to fetch batch after {retries} attempts: {exc}"
+            ) from exc
         except urllib.error.URLError as exc:
             if attempt < retries - 1:
                 time.sleep(2 ** attempt)
-            else:
-                raise RuntimeError(
-                    f"Failed to fetch batch after {retries} attempts: {exc}"
-                ) from exc
+                continue
+            raise RuntimeError(
+                f"Failed to fetch batch after {retries} attempts: {exc}"
+            ) from exc
+
+        if _is_stream_error(text):
+            if attempt < retries - 1:
+                time.sleep(2 ** attempt)
+                continue
+            raise RuntimeError(
+                f"UniProt's stream endpoint failed after {retries} attempts: "
+                f"{text.strip()[:200]!r}"
+            )
+
+        return text
 
 
 def fetch_uniparc_entry(acc, retries=3):
