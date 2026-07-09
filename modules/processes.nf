@@ -291,7 +291,7 @@ process SAMPLE_NEGATIVES_ILP {
         --seed               ${params.seed} \\
         --diagnostics-out    ${label}_mqc.tsv \\
         --residuals-out      ${label}_residuals_mqc.tsv \\
-        --max-candidates    70000000 \\
+        --max-candidates    200000 \\
         --verbose
     """
 }

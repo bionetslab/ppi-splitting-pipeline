@@ -23,4 +23,3 @@ dependencies:
     - cvxpy[GUROBI]
     - highspy>=1.7      # OSS MIP fallback for sample_negatives_ilp.py when Gurobi is unavailable
     - pyyaml            # --config YAML for sample_negatives_ilp.py --batch
-    - pytest            # bin/test_sample_negatives_ilp.py

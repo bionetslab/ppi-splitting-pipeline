@@ -27,6 +27,14 @@ import cvxpy as cp
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from utils import read_ppis  # noqa: E402
 
+# Hard cap on each protein's total negative degree, enforced as an ILP
+# constraint (see build_problem): mx_p <= neg_ratio * (1 + MAX_DEGREE_EPSILON)
+# * d_plus_p. The soft --lambda-degree penalty alone can't prevent a handful
+# of proteins from absorbing an otherwise-unavoidable pos/neg degree-mass
+# mismatch, since it's a single aggregate residual normalized across all
+# proteins; this hard constraint bounds every protein individually.
+MAX_DEGREE_EPSILON = 5
+
 
 # ============================================================
 # 1. Config & CLI
@@ -101,12 +109,6 @@ def parse_args(argv=None) -> argparse.Namespace:
 
 
 def _validate_config(cfg: SamplingConfig) -> None:
-    if abs(cfg.alpha_confidence + cfg.alpha_bias - 1.0) > 1e-6:
-        raise ValueError(
-            f"--alpha-confidence + --alpha-bias must sum to 1 "
-            f"(got {cfg.alpha_confidence} + {cfg.alpha_bias} = "
-            f"{cfg.alpha_confidence + cfg.alpha_bias})"
-        )
     if cfg.degree_bias_mode not in ("unified", "split"):
         raise ValueError("--degree-bias-mode must be 'unified' or 'split'")
     if cfg.degree_bias_mode == "unified" and cfg.lambda_taxon_pair != 0:
@@ -225,11 +227,17 @@ def load_confidence(path, protein_to_idx) -> dict:
     return conf
 
 
-def load_candidate_network(path, protein_to_idx, pos_pairs_set):
+def load_candidate_network(path, protein_to_idx, pos_pairs_set, cfg: SamplingConfig):
     """Read a pre-supplied candidate network CSV (protein1,protein2[,w]).
 
     Returns (candidates (n,2) int64 sorted array, confidence_override dict or
     None). Restricts to the given protein universe and excludes positives.
+
+    If --lambda-self-loop > 0, every (i, i) self-pair not already a positive
+    self-interaction is added to the pool even if absent from the file, so
+    self-interactions are always candidates regardless of what the supplied
+    network happens to cover. Skipped entirely when the self-loop bias isn't
+    requested, since there's then no reason to force them in.
     """
     pairs = set()
     weights = {}
@@ -247,6 +255,13 @@ def load_candidate_network(path, protein_to_idx, pos_pairs_set):
             pairs.add((i, j))
             if has_w and row.get("w"):
                 weights[(i, j)] = float(row["w"])
+
+    if cfg.lambda_self_loop > 0:
+        pos_self = {i for i, j in pos_pairs_set if i == j}
+        for i in range(len(protein_to_idx)):
+            if i not in pos_self:
+                pairs.add((i, i))
+
     if not pairs:
         return np.zeros((0, 2), dtype=np.int64), (weights or None)
     return np.array(sorted(pairs), dtype=np.int64), (weights or None)
@@ -256,17 +271,31 @@ def load_candidate_network(path, protein_to_idx, pos_pairs_set):
 # 3. Candidate enumeration
 # ============================================================
 
-def build_candidate_set(n_proteins, pos_pairs, max_candidates=50_000_000) -> np.ndarray:
+def build_candidate_set(n_proteins, pos_pairs, cfg: SamplingConfig, max_candidates=50_000_000, seed=42,
+                         taxon_codes=None, go_membership=None, go_sizes=None) -> np.ndarray:
     """Return (n_cand, 2) int array of (i, j) with i <= j, upper-triangle,
     excluding positives, sorted ascending by (i, j). Vectorized (no Python
-    loop over candidate pairs)."""
+    loop over candidate pairs).
+
+    If the full complement would exceed max_candidates, warns and returns an
+    informed random subsample of that size instead of enumerating every pair
+    (which would itself blow the memory budget --max-candidates guards
+    against). See _subsample_candidate_pairs for how `cfg`, `taxon_codes` and
+    `go_membership`/`go_sizes` shape that subsample."""
+    print(f"Number of unique proteins in the positive set: {len(pos_pairs)}")
     n_pairs_full = n_proteins * (n_proteins + 1) // 2
     n_est = n_pairs_full - len(pos_pairs)
     if n_est > max_candidates:
-        raise RuntimeError(
-            f"Default candidate set would have ~{n_est:,} pairs, exceeding "
-            f"--max-candidates={max_candidates:,}. Supply --candidate-network "
-            f"to restrict the pool, or raise --max-candidates if you have the memory."
+        logging.warning(
+            "Default candidate set would have ~%s pairs, exceeding --max-candidates=%s; "
+            "subsampling %s random candidate pairs instead of the full complement. "
+            "Supply --candidate-network to restrict the pool deliberately, or raise "
+            "--max-candidates if you have the memory.",
+            f"{n_est:,}", f"{max_candidates:,}", f"{max_candidates:,}",
+        )
+        return _subsample_candidate_pairs(
+            n_proteins, pos_pairs, max_candidates, cfg, seed=seed,
+            taxon_codes=taxon_codes, go_membership=go_membership, go_sizes=go_sizes,
         )
     i_idx, j_idx = np.triu_indices(n_proteins)
     if len(pos_pairs):
@@ -274,6 +303,150 @@ def build_candidate_set(n_proteins, pos_pairs, max_candidates=50_000_000) -> np.
         pos_keys = np.sort(pos_pairs[:, 0].astype(np.int64) * n_proteins + pos_pairs[:, 1].astype(np.int64))
         mask = ~np.isin(keys_all, pos_keys, assume_unique=True)
         i_idx, j_idx = i_idx[mask], j_idx[mask]
+    return np.stack([i_idx, j_idx], axis=1).astype(np.int64)
+
+
+def _missing_self_pairs(n_proteins, pos_pairs) -> np.ndarray:
+    """(k, 2) array of every (i, i) that is not already a positive
+    self-interaction."""
+    all_i = np.arange(n_proteins, dtype=np.int64)
+    if len(pos_pairs):
+        pi, pj = pos_pairs[:, 0], pos_pairs[:, 1]
+        pos_self = np.unique(pi[pi == pj])
+        all_i = all_i[~np.isin(all_i, pos_self, assume_unique=True)]
+    return np.stack([all_i, all_i], axis=1)
+
+
+def _positive_same_species_fraction(pos_pairs, taxon_codes) -> float:
+    """Fraction of positive pairs that are same-species (a self-interaction
+    counts as same-species), edge-level (not averaged per protein)."""
+    if len(pos_pairs) == 0:
+        return 0.0
+    i_arr, j_arr = pos_pairs[:, 0], pos_pairs[:, 1]
+    return float(np.mean(taxon_codes[i_arr] == taxon_codes[j_arr]))
+
+
+def _fill_stratum(rng, n_proteins, exclude_keys, quota, taxon_codes=None, want_same=None,
+                   go_membership=None, go_sizes=None, max_rounds=200) -> np.ndarray:
+    """Draw up to `quota` unique (i, j) keys (i <= j, encoded as i*n_proteins+j)
+    via repeated random batches, excluding `exclude_keys` (e.g. positives).
+
+    If `want_same` is not None, restrict to same-species (True) or
+    cross-species (False) pairs per `taxon_codes` -- used to stratify a
+    subsample so a much-larger cross-species population can't swamp the
+    much-rarer same-species one. If `go_membership`/`go_sizes` are given,
+    pairs with nonzero GO-BP Jaccard are always kept first (they're rare in
+    a uniform draw but are what's needed to hit a nonzero target mean),
+    with plain draws filling out the rest of the quota.
+
+    Returns fewer than `quota` keys (with a warning) if this stratum's true
+    population turns out to be smaller, after `max_rounds` batches."""
+    if quota <= 0:
+        return np.empty(0, dtype=np.int64)
+
+    priority_keys = np.empty(0, dtype=np.int64)
+    filler_keys = np.empty(0, dtype=np.int64)
+
+    for _ in range(max_rounds):
+        have = len(priority_keys) + len(filler_keys)
+        if have >= quota:
+            break
+        batch_size = max(10_000, (quota - have) * 5)
+        i = rng.integers(0, n_proteins, size=batch_size, dtype=np.int64)
+        j = rng.integers(0, n_proteins, size=batch_size, dtype=np.int64)
+        lo, hi = np.minimum(i, j), np.maximum(i, j)
+        batch_keys = np.unique(lo * n_proteins + hi)
+        if len(exclude_keys):
+            batch_keys = batch_keys[~np.isin(batch_keys, exclude_keys, assume_unique=True)]
+        already = np.union1d(priority_keys, filler_keys)
+        if len(already):
+            batch_keys = batch_keys[~np.isin(batch_keys, already, assume_unique=True)]
+        if len(batch_keys) == 0:
+            continue
+
+        bi, bj = batch_keys // n_proteins, batch_keys % n_proteins
+        if want_same is not None:
+            same_mask = taxon_codes[bi] == taxon_codes[bj]
+            keep_mask = same_mask if want_same else ~same_mask
+            batch_keys, bi, bj = batch_keys[keep_mask], bi[keep_mask], bj[keep_mask]
+        if len(batch_keys) == 0:
+            continue
+
+        if go_membership is not None:
+            jac = _pairwise_jaccard(np.stack([bi, bj], axis=1), go_membership, go_sizes)
+            priority_keys = np.union1d(priority_keys, batch_keys[jac > 0])
+            filler_keys = np.union1d(filler_keys, batch_keys[jac == 0])
+        else:
+            filler_keys = np.union1d(filler_keys, batch_keys)
+    else:
+        logging.warning(
+            "Could not fill a candidate stratum (quota=%d) after %d sampling "
+            "rounds; its true population is likely smaller than requested. "
+            "Using the %d candidates found.",
+            quota, max_rounds, len(priority_keys) + len(filler_keys),
+        )
+
+    if len(priority_keys) >= quota:
+        return priority_keys[:quota]
+    return np.union1d(priority_keys, filler_keys[:quota - len(priority_keys)])
+
+
+def _subsample_candidate_pairs(n_proteins, pos_pairs, n_target, cfg: SamplingConfig, seed=42,
+                                taxon_codes=None, go_membership=None, go_sizes=None) -> np.ndarray:
+    """Randomly draw n_target unique (i, j) pairs with i <= j, excluding
+    positives, without ever materializing the full upper-triangle. Used when
+    the full complement is too large to enumerate directly.
+
+    Sampling is informed by whichever biases are actually active:
+    - If --lambda-self-loop > 0, every non-positive self-pair (i, i) is
+      always kept first, even past n_target if necessary. Skipped entirely
+      otherwise, since there's then no reason to force them in.
+    - If `taxon_codes` is given (a taxonomy-relevant bias is active), the
+      remaining budget is stratified into same-/cross-species portions
+      matching the ratio observed in the positive set, instead of one
+      uniform draw that a much-larger cross-species population would swamp.
+    - If `go_membership`/`go_sizes` are given (--lambda-jaccard > 0),
+      nonzero-Jaccard pairs encountered while filling each stratum (or the
+      whole budget, if taxonomy isn't active) are always kept first.
+    """
+    rng = np.random.default_rng(seed)
+    pos_keys = (
+        np.sort(pos_pairs[:, 0].astype(np.int64) * n_proteins + pos_pairs[:, 1].astype(np.int64))
+        if len(pos_pairs) else np.empty(0, dtype=np.int64)
+    )
+
+    self_keys = np.empty(0, dtype=np.int64)
+    if cfg.lambda_self_loop > 0:
+        self_pairs = _missing_self_pairs(n_proteins, pos_pairs)
+        self_keys = np.sort(self_pairs[:, 0] * n_proteins + self_pairs[:, 1])
+    remaining = max(n_target - len(self_keys), 0)
+
+    if taxon_codes is not None:
+        same_ratio = _positive_same_species_fraction(pos_pairs, taxon_codes)
+        n_same = int(round(same_ratio * remaining))
+        n_cross = remaining - n_same
+        same_keys = _fill_stratum(rng, n_proteins, pos_keys, n_same, taxon_codes=taxon_codes,
+                                   want_same=True, go_membership=go_membership, go_sizes=go_sizes)
+        cross_keys = _fill_stratum(rng, n_proteins, pos_keys, n_cross, taxon_codes=taxon_codes,
+                                    want_same=False, go_membership=go_membership, go_sizes=go_sizes)
+        drawn_keys = np.union1d(same_keys, cross_keys)
+        shortfall = remaining - len(drawn_keys)
+        if shortfall > 0:
+            exclude = np.union1d(pos_keys, np.union1d(self_keys, drawn_keys))
+            drawn_keys = np.union1d(drawn_keys, _fill_stratum(rng, n_proteins, exclude, shortfall))
+    else:
+        drawn_keys = _fill_stratum(rng, n_proteins, pos_keys, remaining,
+                                    go_membership=go_membership, go_sizes=go_sizes)
+
+    keys = np.union1d(self_keys, drawn_keys)
+
+    if len(keys) > n_target:
+        is_self = np.isin(keys, self_keys, assume_unique=True)
+        non_self_keys = keys[~is_self]
+        n_non_self_target = max(n_target - int(is_self.sum()), 0)
+        keys = np.sort(np.concatenate([keys[is_self], non_self_keys[:n_non_self_target]]))
+
+    i_idx, j_idx = keys // n_proteins, keys % n_proteins
     return np.stack([i_idx, j_idx], axis=1).astype(np.int64)
 
 
@@ -296,6 +469,135 @@ def _pairwise_jaccard(pairs, membership, sizes) -> np.ndarray:
     nz = union > 0
     jac[nz] = inter[nz] / union[nz]
     return jac
+
+
+def _build_go_membership(go_bp) -> tuple[sp.csr_matrix, np.ndarray]:
+    """(n_proteins, n_terms) 0/1 membership matrix and per-protein term counts."""
+    terms = sorted({t for s in go_bp for t in s})
+    term_to_col = {t: k for k, t in enumerate(terms)}
+    rows, cols = [], []
+    for p, s in enumerate(go_bp):
+        for t in s:
+            rows.append(p)
+            cols.append(term_to_col[t])
+    membership = sp.csr_matrix(
+        (np.ones(len(rows)), (rows, cols)), shape=(len(go_bp), len(terms))
+    )
+    sizes = np.asarray(membership.sum(axis=1)).ravel()
+    return membership, sizes
+
+
+# ============================================================
+# 3b. Descriptive dataset stats (pos vs. neg)
+# ============================================================
+
+def _unique_proteins(pairs) -> np.ndarray:
+    if len(pairs) == 0:
+        return np.zeros(0, dtype=np.int64)
+    return np.unique(pairs.ravel())
+
+
+def _degree_array(pairs, n_proteins) -> np.ndarray:
+    """Per-protein interaction degree; self-loops contribute 1 (not 2),
+    matching the convention used by _build_incidence."""
+    deg = np.zeros(n_proteins, dtype=np.float64)
+    if len(pairs):
+        i_arr, j_arr = pairs[:, 0], pairs[:, 1]
+        self_mask = i_arr == j_arr
+        np.add.at(deg, i_arr, 1.0)
+        np.add.at(deg, j_arr[~self_mask], 1.0)
+    return deg
+
+
+def _same_species_ratio(pairs, n_proteins, taxon_codes) -> np.ndarray:
+    """Per-protein fraction of interactions that are same-species (a
+    self-interaction counts as same-species). NaN for proteins with none."""
+    same = np.zeros(n_proteins, dtype=np.float64)
+    total = np.zeros(n_proteins, dtype=np.float64)
+    if len(pairs):
+        i_arr, j_arr = pairs[:, 0], pairs[:, 1]
+        self_mask = i_arr == j_arr
+        is_same = (taxon_codes[i_arr] == taxon_codes[j_arr]).astype(np.float64)
+        rows = np.concatenate([i_arr, j_arr[~self_mask]])
+        vals = np.concatenate([is_same, is_same[~self_mask]])
+        np.add.at(total, rows, 1.0)
+        np.add.at(same, rows, vals)
+    ratio = np.full(n_proteins, np.nan)
+    nz = total > 0
+    ratio[nz] = same[nz] / total[nz]
+    return ratio
+
+
+def _fmt_degree_stats(deg: np.ndarray) -> str:
+    deg = deg[deg > 0]
+    if len(deg) == 0:
+        return "n/a"
+    return f"median={np.median(deg):.2f} mean={np.mean(deg):.2f} max={np.max(deg):.0f}"
+
+
+def print_objective_breakdown(name, diag: dict) -> None:
+    """Print each term's share of the objective, so it's obvious when one
+    term (e.g. an unsatisfiable self-loop target) is silently dominating and
+    crowding out the others, even when their lambdas are set equal."""
+    obj = diag["obj_value"]
+    terms = [
+        ("confidence", diag["confidence_term"]),
+        ("degree", diag["bias_deg_term"]),
+        ("taxon_pair", diag["bias_tax_term"]),
+        ("self_loop", diag["bias_self_term"]),
+        ("jaccard", diag["bias_jac_term"]),
+    ]
+    print(f"=== Objective breakdown: {name} (total={obj:.4f}) ===")
+    for label, val in terms:
+        pct = (val / obj * 100) if obj else 0.0
+        print(f"  {label:<10} {val:.4f}  ({pct:5.1f}%)")
+    print()
+
+
+def print_dataset_stats(name, pos_pairs, neg_pairs, ctx: "BuildContext", cfg: SamplingConfig) -> None:
+    """Print pos-vs-neg comparison stats for one split. Protein counts are
+    always shown; the rest are gated on which --lambda-* biases were
+    requested, since the underlying data (species, GO terms) is only loaded
+    when a bias actually needs it."""
+    print(f"\n=== Dataset stats: {name} ===")
+
+    print(f"PPIs                  -- positive: {len(pos_pairs)}   negative: {len(neg_pairs)}")
+
+    pos_proteins = _unique_proteins(pos_pairs)
+    neg_proteins = _unique_proteins(neg_pairs)
+    print(f"Unique proteins       -- positive: {len(pos_proteins)}   negative: {len(neg_proteins)}")
+
+    if cfg.lambda_self_loop > 0:
+        n_self_pos = int(np.sum(pos_pairs[:, 0] == pos_pairs[:, 1])) if len(pos_pairs) else 0
+        n_self_neg = int(np.sum(neg_pairs[:, 0] == neg_pairs[:, 1])) if len(neg_pairs) else 0
+        print(f"Self-interactions     -- positive: {n_self_pos}   negative: {n_self_neg}")
+
+    if cfg.lambda_degree > 0:
+        deg_pos = _degree_array(pos_pairs, ctx.n_proteins)
+        deg_neg = _degree_array(neg_pairs, ctx.n_proteins)
+        print(f"Degree (positive)     -- {_fmt_degree_stats(deg_pos)}")
+        print(f"Degree (negative)     -- {_fmt_degree_stats(deg_neg)}")
+
+    species_used = (
+        (cfg.degree_bias_mode == "unified" and cfg.lambda_degree > 0)
+        or (cfg.degree_bias_mode == "split" and cfg.lambda_taxon_pair > 0)
+    )
+    if species_used and ctx.species_path is not None:
+        taxon_codes, _ = ctx.ensure_taxonomy()
+        same_pos = _same_species_ratio(pos_pairs, ctx.n_proteins, taxon_codes)
+        same_neg = _same_species_ratio(neg_pairs, ctx.n_proteins, taxon_codes)
+        mean_same_pos, mean_same_neg = np.nanmean(same_pos), np.nanmean(same_neg)
+        print(f"Same-species ratio    -- positive: {mean_same_pos:.3f}   negative: {mean_same_neg:.3f}")
+        print(f"Cross-species ratio   -- positive: {1 - mean_same_pos:.3f}   negative: {1 - mean_same_neg:.3f}")
+
+    if cfg.lambda_jaccard > 0 and ctx.go_annotations_path is not None:
+        membership, sizes = _build_go_membership(ctx.ensure_go_bp())
+        jac_pos = _pairwise_jaccard(pos_pairs, membership, sizes) if len(pos_pairs) else np.zeros(0)
+        jac_neg = _pairwise_jaccard(neg_pairs, membership, sizes) if len(neg_pairs) else np.zeros(0)
+        mean_jac_pos = np.mean(jac_pos) if len(jac_pos) else float("nan")
+        mean_jac_neg = np.mean(jac_neg) if len(jac_neg) else float("nan")
+        print(f"Mean GO-BP Jaccard    -- positive: {mean_jac_pos:.3f}   negative: {mean_jac_neg:.3f}")
+    print()
 
 
 # ============================================================
@@ -360,24 +662,47 @@ class BuildContext:
                 pos = np.clip(pos, 0, len(keys) - 1)
                 found = keys[pos] == q_keys
                 arr[pos[found]] = q_vals[found]
+
+                # Self-interactions with no explicit score in the confidence
+                # source default to the lowest confidence observed there
+                # (least-favored as negatives) rather than the pool default
+                # of 1.0 -- silence on a self-pair shouldn't read as
+                # high-confidence evidence that it's a real non-interaction.
+                is_self = self.candidates[:, 0] == self.candidates[:, 1]
+                scored = np.zeros(len(arr), dtype=bool)
+                scored[pos[found]] = True
+                unscored_self = is_self & ~scored
+                if np.any(unscored_self):
+                    arr[unscored_self] = q_vals.min()
             self.confidence_arr = arr
         return self.confidence_arr
 
 
 def build_context(pos_pairs, protein_to_idx, idx_to_protein, candidates, neg_ratio,
                    species_path=None, go_annotations_path=None,
-                   confidence_path=None, confidence_override=None) -> BuildContext:
+                   confidence_path=None, confidence_override=None,
+                   taxonomy_codes=None, n_taxa=None, go_bp=None) -> BuildContext:
+    """taxonomy_codes/n_taxa/go_bp let a caller that already loaded them (e.g.
+    to inform candidate subsampling) hand them straight to the context,
+    instead of BuildContext.ensure_taxonomy()/ensure_go_bp() re-reading the
+    same files from disk a second time."""
     n_proteins = len(protein_to_idx)
     n_pos = len(pos_pairs)
     n_neg = int(round(neg_ratio * n_pos))
     incidence = _build_incidence(n_proteins, candidates)
-    return BuildContext(
+    ctx = BuildContext(
         n_proteins=n_proteins, candidates=candidates, pos_pairs=pos_pairs,
         n_pos=n_pos, n_neg=n_neg, r=neg_ratio, incidence=incidence,
         protein_to_idx=protein_to_idx, idx_to_protein=idx_to_protein,
         species_path=species_path, go_annotations_path=go_annotations_path,
         confidence_path=confidence_path, confidence_override=confidence_override,
     )
+    if taxonomy_codes is not None:
+        ctx.taxonomy_codes = taxonomy_codes
+        ctx.n_taxa = n_taxa
+    if go_bp is not None:
+        ctx.go_bp = go_bp
+    return ctx
 
 
 class BiasTerm:
@@ -449,17 +774,7 @@ class JaccardMeanBias(BiasTerm):
 
     def precompute(self, ctx: BuildContext) -> None:
         go_bp = ctx.ensure_go_bp()
-        terms = sorted({t for s in go_bp for t in s})
-        term_to_col = {t: k for k, t in enumerate(terms)}
-        rows, cols = [], []
-        for p, s in enumerate(go_bp):
-            for t in s:
-                rows.append(p)
-                cols.append(term_to_col[t])
-        membership = sp.csr_matrix(
-            (np.ones(len(rows)), (rows, cols)), shape=(len(go_bp), len(terms))
-        )
-        sizes = np.asarray(membership.sum(axis=1)).ravel()
+        membership, sizes = _build_go_membership(go_bp)
 
         self.J_cand = _pairwise_jaccard(ctx.candidates, membership, sizes)
         if len(ctx.pos_pairs):
@@ -718,9 +1033,16 @@ _TERM_KEY = {
 }
 
 
+def _max_degree_cap(ctx: BuildContext) -> np.ndarray:
+    """Per-protein hard cap on total negative degree: neg_ratio * (1 +
+    MAX_DEGREE_EPSILON) * d_plus. See MAX_DEGREE_EPSILON at the top of the file."""
+    dplus = _degree_array(ctx.pos_pairs, ctx.n_proteins)
+    return ctx.r * (1.0 + MAX_DEGREE_EPSILON) * dplus
+
+
 def build_problem(ctx: BuildContext, confidence: ConfidenceLoss, active_biases, cfg: SamplingConfig):
     x = cp.Variable(len(ctx.candidates), boolean=True)
-    constraints = [cp.sum(x) == ctx.n_neg]
+    constraints = [cp.sum(x) == ctx.n_neg, ctx.incidence @ x <= _max_degree_cap(ctx)]
 
     _, conf_constraints, conf_raw = confidence.build(x, ctx)
     constraints += conf_constraints
@@ -870,20 +1192,47 @@ def sample_negatives_ilp(name, pos_ppis, output_path, cfg: SamplingConfig, neg_r
     pos_pairs = pos_pairs_from_rows(pos_ppis, protein_to_idx)
     pos_pairs_set = {tuple(p) for p in pos_pairs.tolist()}
 
+    # Pre-load whatever the active biases need, so an over-budget subsample
+    # (build_candidate_set -> _subsample_candidate_pairs) can be informed by
+    # it instead of falling back to a plain uniform draw. Handed to
+    # build_context below too, so ensure_taxonomy()/ensure_go_bp() don't
+    # re-read the same files a second time.
+    taxonomy_relevant = (
+        (cfg.degree_bias_mode == "unified" and cfg.lambda_degree > 0)
+        or (cfg.degree_bias_mode == "split" and cfg.lambda_taxon_pair > 0)
+    )
+    taxonomy_codes = n_taxa = None
+    if taxonomy_relevant and species_path is not None:
+        taxonomy = load_species(species_path, protein_to_idx)
+        uniq, taxonomy_codes = np.unique(taxonomy, return_inverse=True)
+        taxonomy_codes = taxonomy_codes.astype(np.int64)
+        n_taxa = int(len(uniq))
+
+    go_bp = go_membership = go_sizes = None
+    if cfg.lambda_jaccard > 0 and go_annotations_path is not None:
+        go_bp = load_go_bp(go_annotations_path, protein_to_idx)
+        go_membership, go_sizes = _build_go_membership(go_bp)
+
     confidence_override = None
     if candidate_network_path is not None:
         candidates, confidence_override = load_candidate_network(
-            candidate_network_path, protein_to_idx, pos_pairs_set
+            candidate_network_path, protein_to_idx, pos_pairs_set, cfg
         )
     else:
         candidates = build_candidate_set(
-            len(protein_to_idx), pos_pairs, max_candidates=cfg.max_candidates
+            len(protein_to_idx), pos_pairs, cfg, max_candidates=cfg.max_candidates, seed=cfg.seed,
+            taxon_codes=taxonomy_codes, go_membership=go_membership, go_sizes=go_sizes,
         )
+    print(f"Candidate pool size: {len(candidates)}", file=sys.stderr)
+    print(f"Number of unique proteins in the candidate set: {np.max(candidates)}", file=sys.stderr)
+    print(f"Number of positive self-interactions: {sum(pos_pairs[:,0] == pos_pairs[:, 1])}", file=sys.stderr)
+    print(f"Number of possible self-interactions in the candidates: {sum(candidates[:,0] == candidates[:, 1])}", file=sys.stderr)
 
     ctx = build_context(
         pos_pairs, protein_to_idx, idx_to_protein, candidates, neg_ratio,
         species_path=species_path, go_annotations_path=go_annotations_path,
         confidence_path=confidence_path, confidence_override=confidence_override,
+        taxonomy_codes=taxonomy_codes, n_taxa=n_taxa, go_bp=go_bp,
     )
 
     if ctx.n_neg > len(ctx.candidates):
@@ -908,6 +1257,8 @@ def sample_negatives_ilp(name, pos_ppis, output_path, cfg: SamplingConfig, neg_r
                 "bias_deg_term": 0.0, "bias_tax_term": 0.0, "bias_self_term": 0.0,
                 "bias_jac_term": 0.0, "solver": "trivial", "wall_time_s": 0.0,
                 "mip_gap": 0.0, "status": "optimal (all candidates forced)"}
+        print_objective_breakdown(name, diag)
+        print_dataset_stats(name, ctx.pos_pairs, ctx.candidates, ctx, cfg)
         return diag, ctx
 
     confidence, biases = assemble_active_biases(cfg)
@@ -916,20 +1267,18 @@ def sample_negatives_ilp(name, pos_ppis, output_path, cfg: SamplingConfig, neg_r
         b.precompute(ctx)
     active = [b for b in biases if b.is_active()]
 
-    lambda_sum = sum(b.lambda_weight for b in active)
-    if active and abs(lambda_sum - 1.0) > 1e-6:
-        if cfg.strict_weights:
-            raise ValueError(
-                f"{name}: active bias weights sum to {lambda_sum:.6f}, expected 1.0. "
-                f"Fix --lambda-* flags, or drop --strict-weights to auto-rescale."
-            )
-        logging.warning("%s: active bias weights sum to %.6f (expected 1); rescaling.", name, lambda_sum)
-        for b in active:
-            b.lambda_weight /= lambda_sum
-
     problem, x, conf_raw, term_exprs = build_problem(ctx, confidence, active, cfg)
     solver, options = select_solver(cfg, gurobi_license_path, cfg.verbose)
-    result = solve(problem, solver, options, verbose=cfg.verbose)
+    try:
+        result = solve(problem, solver, options, verbose=cfg.verbose)
+    except RuntimeError as exc:
+        raise RuntimeError(
+            f"{exc} Note: every split enforces a hard per-protein negative-degree "
+            f"cap of neg_ratio * {1 + MAX_DEGREE_EPSILON} * d_plus; infeasibility "
+            f"often means the positive set's structure (e.g. too many "
+            f"self-interactions relative to available negative self-pairs) makes "
+            f"exact ratio-matched negatives impossible. Consider lowering --neg-ratio."
+        ) from exc
     negatives_idx = extract_negatives(x.value, ctx)
 
     term_values = {"bias_deg_term": 0.0, "bias_tax_term": 0.0, "bias_self_term": 0.0, "bias_jac_term": 0.0}
@@ -947,6 +1296,8 @@ def sample_negatives_ilp(name, pos_ppis, output_path, cfg: SamplingConfig, neg_r
                 verbose_rows_out.append({"split": name, **row})
 
     write_split_csv(pos_ppis, negatives_idx.tolist(), ctx.idx_to_protein, output_path)
+    print_objective_breakdown(name, diag)
+    print_dataset_stats(name, ctx.pos_pairs, negatives_idx, ctx, cfg)
     return diag, ctx
 
 
