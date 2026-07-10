@@ -3,12 +3,12 @@ nextflow.enable.dsl=2
 
 include { samplesheetToList } from 'plugin/nf-schema'
 
-include { DATA_PREP }        from './workflows/data_prep'
-include { CLUSTERING }       from './workflows/clustering'
-include { SPLIT_POSITIVES }  from './workflows/split_positives'
-include { SAMPLE_NEGATIVES } from './workflows/sample_negatives'
-include { TRAIN_BASELINE }   from './workflows/train_baseline'
-include { QC }               from './workflows/qc'
+include { DATA_PREP }        from './subworkflows/data_prep'
+include { CLUSTERING }       from './subworkflows/clustering'
+include { SPLIT_POSITIVES }  from './subworkflows/split_positives'
+include { SAMPLE_NEGATIVES } from './subworkflows/sample_negatives'
+include { TRAIN_BASELINE }   from './subworkflows/train_baseline'
+include { QC }               from './subworkflows/qc'
 
 // samplesheetToList() represents a blank optional cell as [] (empty list),
 // not null, regardless of the field's declared type -- so a plain `!= null`
