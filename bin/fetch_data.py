@@ -9,10 +9,11 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-UNIPROT_URL      = "https://rest.uniprot.org/uniprotkb/stream"
+UNIPROT_URL      = "https://rest.uniprot.org/uniprotkb/search"
 UNIPROT_FASTA_URL = "https://rest.uniprot.org/uniprotkb/{acc}.fasta"
 UNIPARC_URL      = "https://rest.uniprot.org/uniparc/search"
 BATCH_SIZE = 100
+SEARCH_PAGE_SIZE = 500  # UniProt's documented max page size for /uniprotkb/search
 
 
 class InvalidAccessionBatch(Exception):
@@ -79,29 +80,33 @@ _STREAM_ERROR_MARKER = "error encountered when streaming data"
 
 
 def _is_stream_error(text: str) -> bool:
-    """True if `text` is UniProt's own error page for a /stream request that
-    failed server-side after the response had already started (HTTP 200), so
-    it never raises HTTPError/URLError and would otherwise look like a
+    """True if `text` is UniProt's own error page for a request that failed
+    server-side after the response had already started (HTTP 200), so it
+    never raises HTTPError/URLError and would otherwise look like a
     successful-but-unparseable TSV response."""
     return _STREAM_ERROR_MARKER in text.lower()
 
 
-def fetch_batch(accessions, retries=3):
-    """Batch request returning accession, sequence, GO IDs, and taxon ID as TSV.
+def _next_page_url(link_header):
+    """Parse the RFC 5988 `Link` header UniProt returns on /search responses
+    and return the rel="next" URL, or None if this was the last page."""
+    if not link_header:
+        return None
+    for part in link_header.split(","):
+        segments = [s.strip() for s in part.split(";")]
+        if len(segments) >= 2 and segments[1] == 'rel="next"' and segments[0].startswith("<"):
+            return segments[0].strip("<>")
+    return None
 
-    accessions should be canonical (no isoform suffix) to ensure UniProt matches them.
-    """
-    query = " OR ".join(f"accession:{acc}" for acc in accessions)
-    params = urllib.parse.urlencode({
-        "query": query,
-        "format": "tsv",
-        "fields": "accession,sequence,go_p,go_f,go_c,organism_id",
-    })
-    req = urllib.request.Request(f"{UNIPROT_URL}?{params}")
+
+def _fetch_page(url, retries=3):
+    """Fetch one page from /uniprotkb/search, returning (body_text, next_page_url_or_None)."""
+    req = urllib.request.Request(url)
     for attempt in range(retries):
         try:
             with urllib.request.urlopen(req, timeout=120, context=_ssl_context()) as resp:
                 text = resp.read().decode("utf-8")
+                next_url = _next_page_url(resp.headers.get("Link"))
         except urllib.error.HTTPError as exc:
             if exc.code == 400:
                 # UniProt rejects the entire OR-joined query if any accession in
@@ -112,26 +117,60 @@ def fetch_batch(accessions, retries=3):
                 time.sleep(2 ** attempt)
                 continue
             raise RuntimeError(
-                f"Failed to fetch batch after {retries} attempts: {exc}"
+                f"Failed to fetch page after {retries} attempts: {exc}"
             ) from exc
         except urllib.error.URLError as exc:
             if attempt < retries - 1:
                 time.sleep(2 ** attempt)
                 continue
             raise RuntimeError(
-                f"Failed to fetch batch after {retries} attempts: {exc}"
+                f"Failed to fetch page after {retries} attempts: {exc}"
             ) from exc
+        else:
+            if _is_stream_error(text):
+                if attempt < retries - 1:
+                    time.sleep(2 ** attempt)
+                    continue
+                raise RuntimeError(
+                    f"UniProt's search endpoint failed after {retries} attempts: "
+                    f"{text.strip()[:200]!r}"
+                )
+            return text, next_url
+    raise RuntimeError(f"fetch_page called with retries={retries} <= 0")
 
-        if _is_stream_error(text):
-            if attempt < retries - 1:
-                time.sleep(2 ** attempt)
-                continue
-            raise RuntimeError(
-                f"UniProt's stream endpoint failed after {retries} attempts: "
-                f"{text.strip()[:200]!r}"
-            )
 
-        return text
+def fetch_batch(accessions, retries=3):
+    """Batch request returning accession, sequence, GO IDs, and taxon ID as TSV.
+
+    accessions should be canonical (no isoform suffix) to ensure UniProt matches them.
+    Uses UniProt's paginated /uniprotkb/search endpoint (per their guidance for
+    fetching large numbers of results, https://www.uniprot.org/help/pagination)
+    rather than /stream, which holds one connection open for the whole result
+    set and is more prone to being cut off by transient server-side errors.
+    Follows the `Link: rel="next"` cursor until UniProt reports no more pages
+    (in practice always one page here, since BATCH_SIZE <= SEARCH_PAGE_SIZE).
+    """
+    query = " OR ".join(f"accession:{acc}" for acc in accessions)
+    params = urllib.parse.urlencode({
+        "query": query,
+        "format": "tsv",
+        "fields": "accession,sequence,go_p,go_f,go_c,organism_id",
+        "size": SEARCH_PAGE_SIZE,
+    })
+    url = f"{UNIPROT_URL}?{params}"
+
+    header = None
+    rows = []
+    while url:
+        text, url = _fetch_page(url, retries)
+        lines = text.splitlines()
+        if not lines:
+            break
+        if header is None:
+            header = lines[0]
+        rows.extend(lines[1:])
+
+    return "\n".join([header or "", *rows])
 
 
 def fetch_uniparc_entry(acc, retries=3):
