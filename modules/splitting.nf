@@ -1,20 +1,17 @@
 process SORT_PPIS {
-    tag "sort"
+    tag "${meta.id}"
 
     input:
-    path ppis
-    path partition
-    path fasta
-    path node_mapping
+    tuple val(meta), path(ppis), path(fasta), path(partition), path(node_mapping)
 
     output:
-    path "train.csv",          emit: train_ppis
-    path "val.csv",            emit: val_ppis
-    path "test.csv",           emit: test_ppis
-    path "train.fasta",        emit: train_fasta
-    path "val.fasta",          emit: val_fasta
-    path "test.fasta",         emit: test_fasta
-    path "*_mqc.tsv",          emit: mqc
+    tuple val(meta), path("train.csv"),   emit: train_ppis
+    tuple val(meta), path("val.csv"),     emit: val_ppis
+    tuple val(meta), path("test.csv"),    emit: test_ppis
+    tuple val(meta), path("train.fasta"), emit: train_fasta
+    tuple val(meta), path("val.fasta"),   emit: val_fasta
+    tuple val(meta), path("test.fasta"),  emit: test_fasta
+    tuple val(meta), path("*_mqc.tsv"),   emit: mqc
 
     script:
     """
@@ -27,13 +24,13 @@ process SORT_PPIS {
 }
 
 process CDHIT2D {
-    tag "cdhit2d_${label}"
+    tag "${meta.id}_${label}"
 
     input:
-    tuple val(label), path(db1_fasta), path(db2_fasta)  // label: "train_val" | "train_test"
+    tuple val(meta), val(label), path(db1_fasta), path(db2_fasta)  // label: "train_val" | "train_test"
 
     output:
-    tuple val(label), path("cdhit.out"), emit: sim
+    tuple val(meta), val(label), path("cdhit.out"), emit: sim
 
     script:
     """
@@ -41,31 +38,28 @@ process CDHIT2D {
         -i  ${db1_fasta} \\
         -i2 ${db2_fasta} \\
         -o  cdhit.out \\
-        -c  ${params.cdhit_identity} \\
-        -n  ${params.cdhit_wordsize} \\
+        -c  ${meta.cdhit_identity} \\
+        -n  ${meta.cdhit_wordsize} \\
         -T  ${task.cpus} \\
         -M  4000
     """
 }
 
 process SOLVE_ILP {
-    tag "solve_ilp"
+    tag "${meta.id}"
 
     input:
-    path ppis
-    path fasta
-    path partition
-    path node_mapping
+    tuple val(meta), path(ppis), path(fasta), path(partition), path(node_mapping)
     path gurobi_license
 
     output:
-    path "train.csv",   emit: train_ppis
-    path "val.csv",     emit: val_ppis
-    path "test.csv",    emit: test_ppis
-    path "train.fasta", emit: train_fasta
-    path "val.fasta",   emit: val_fasta
-    path "test.fasta",  emit: test_fasta
-    path "*_mqc.tsv",   emit: mqc
+    tuple val(meta), path("train.csv"),   emit: train_ppis
+    tuple val(meta), path("val.csv"),     emit: val_ppis
+    tuple val(meta), path("test.csv"),    emit: test_ppis
+    tuple val(meta), path("train.fasta"), emit: train_fasta
+    tuple val(meta), path("val.fasta"),   emit: val_fasta
+    tuple val(meta), path("test.fasta"),  emit: test_fasta
+    tuple val(meta), path("*_mqc.tsv"),   emit: mqc
 
     script:
     def license_export = gurobi_license ? "export GRB_LICENSE_FILE=\$PWD/${gurobi_license}" : ""
@@ -76,36 +70,33 @@ process SOLVE_ILP {
         --fasta         ${fasta} \\
         --partition     ${partition} \\
         --node_mapping  ${node_mapping} \\
-        --train-split ${params.train_split} \\
-        --val-split   ${params.val_split} \\
-        --test-split  ${params.test_split} \\
-        --epsilon     ${params.ilp_epsilon} \\
+        --train-split ${meta.train_split} \\
+        --val-split   ${meta.val_split} \\
+        --test-split  ${meta.test_split} \\
+        --epsilon     ${meta.ilp_epsilon} \\
         --max-sec     ${params.ilp_max_sec} \\
         ${params.ilp_solver ? "--solver ${params.ilp_solver}" : ""}
     """
 }
 
 process REMOVE_REDUNDANT {
-    tag "remove_redundant"
+    tag "${meta.id}"
 
     input:
-    path train_ppis
-    path val_ppis
-    path test_ppis
-    path train_fasta
-    path val_fasta
-    path test_fasta
-    path sim_train_val,  stageAs: 'sim_train_val.out'
-    path sim_train_test, stageAs: 'sim_train_test.out'
+    tuple val(meta),
+          path(train_ppis), path(val_ppis), path(test_ppis),
+          path(train_fasta), path(val_fasta), path(test_fasta),
+          path(sim_train_val,  stageAs: 'sim_train_val.out'),
+          path(sim_train_test, stageAs: 'sim_train_test.out')
 
     output:
-    path "train_nr.csv",              emit: train_ppis
-    path "val_nr.csv",                emit: val_ppis
-    path "test_nr.csv",               emit: test_ppis
-    path "train_nr.fasta",            emit: train_fasta
-    path "val_nr.fasta",              emit: val_fasta
-    path "test_nr.fasta",             emit: test_fasta
-    path "*_mqc.tsv",                 emit: mqc
+    tuple val(meta), path("train_nr.csv"),   emit: train_ppis
+    tuple val(meta), path("val_nr.csv"),     emit: val_ppis
+    tuple val(meta), path("test_nr.csv"),    emit: test_ppis
+    tuple val(meta), path("train_nr.fasta"), emit: train_fasta
+    tuple val(meta), path("val_nr.fasta"),   emit: val_fasta
+    tuple val(meta), path("test_nr.fasta"),  emit: test_fasta
+    tuple val(meta), path("*_mqc.tsv"),      emit: mqc
 
     script:
     """

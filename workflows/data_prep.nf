@@ -1,23 +1,29 @@
 include { FETCH_DATA; GET_LENGTHS } from '../modules/data_prep'
 
 // Fetches sequences/GO annotations/species from UniProt (unless already
-// supplied via params.sequences/go_annotations/species) and computes
-// per-protein sequence lengths for the downstream similarity graph.
+// supplied per-dataset via the samplesheet's sequences/go_annotations/species
+// columns) and computes per-protein sequence lengths for the downstream
+// similarity graph. Each dataset independently decides whether to fetch.
 workflow DATA_PREP {
     take:
-    ppis_ch
+    datasets_ch  // tuple(meta, ppis, sequences, go_annotations, species, blast_results, candidate_network)
 
     main:
-    if (params.sequences && params.go_annotations && params.species) {
-        sequences_ch      = channel.value(file(params.sequences,      checkIfExists: true))
-        go_annotations_ch = channel.value(file(params.go_annotations, checkIfExists: true))
-        species_ch        = channel.value(file(params.species,        checkIfExists: true))
-    } else {
-        fetched           = FETCH_DATA(ppis_ch)
-        sequences_ch      = fetched.sequences
-        go_annotations_ch = fetched.go_annotations
-        species_ch        = fetched.species
+    branched = datasets_ch.branch { meta, ppis, sequences, go_annotations, species, blast_results, candidate_network ->
+        precomputed: sequences && go_annotations && species
+            return tuple(meta, sequences, go_annotations, species)
+        needs_fetch: true
+            return tuple(meta, ppis)
     }
+
+    fetched = FETCH_DATA(branched.needs_fetch)
+
+    sequences_ch      = branched.precomputed.map { meta, sequences, go_annotations, species -> tuple(meta, sequences) }
+        .mix(fetched.sequences)
+    go_annotations_ch = branched.precomputed.map { meta, sequences, go_annotations, species -> tuple(meta, go_annotations) }
+        .mix(fetched.go_annotations)
+    species_ch        = branched.precomputed.map { meta, sequences, go_annotations, species -> tuple(meta, species) }
+        .mix(fetched.species)
 
     lengths = GET_LENGTHS(sequences_ch)
 

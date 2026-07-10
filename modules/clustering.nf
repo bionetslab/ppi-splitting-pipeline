@@ -1,12 +1,12 @@
 process RUN_BLAST {
-    publishDir "${params.outdir}/similarities", mode: 'copy'
-    tag "blast"
+    publishDir(path: { "${params.outdir}/${meta.id}/similarities" }, mode: 'copy')
+    tag "${meta.id}"
 
     input:
-    path fasta
+    tuple val(meta), path(fasta)
 
     output:
-    path "all_vs_all.tsv"
+    tuple val(meta), path("all_vs_all.tsv")
 
     script:
     """
@@ -22,16 +22,15 @@ process RUN_BLAST {
 }
 
 process MAKE_METIS {
-    publishDir "${params.outdir}/similarities", mode: 'copy'
-    tag "metis"
+    publishDir(path: { "${params.outdir}/${meta.id}/similarities" }, mode: 'copy')
+    tag "${meta.id}"
 
     input:
-    path blast_results
-    path lengths
+    tuple val(meta), path(blast_results), path(lengths)
 
     output:
-    path "similarity.graph", emit: graph
-    path "node_mapping.tsv", emit: node_mapping
+    tuple val(meta), path("similarity.graph"), emit: graph
+    tuple val(meta), path("node_mapping.tsv"), emit: node_mapping
 
     script:
     """
@@ -40,20 +39,19 @@ process MAKE_METIS {
         ${lengths} \\
         similarity.graph \\
         node_mapping.tsv \\
-        --edge_weight ${params.edge_weight}
+        --edge_weight ${meta.edge_weight}
     """
 }
 
 process RUN_KAHIP {
-    publishDir "${params.outdir}/similarities", mode: 'copy'
-    tag "kahip: k=${k}"
+    publishDir(path: { "${params.outdir}/${meta.id}/similarities" }, mode: 'copy')
+    tag "${meta.id}: k=${k}"
 
     input:
-    path graph
-    val k
+    tuple val(meta), path(graph), val(k)
 
     output:
-    path "partitioned_proteome.txt"
+    tuple val(meta), path("partitioned_proteome.txt")
 
     script:
     """

@@ -1,14 +1,14 @@
 process FETCH_DATA {
-    publishDir "${params.outdir}/data", mode: 'copy'
-    tag "fetch"
+    publishDir(path: { "${params.outdir}/${meta.id}/data" }, mode: 'copy')
+    tag "${meta.id}"
 
     input:
-    path ppis
+    tuple val(meta), path(ppis)
 
     output:
-    path "sequences.fasta",    emit: sequences
-    path "go_annotations.tsv", emit: go_annotations
-    path "species.tsv",        emit: species
+    tuple val(meta), path("sequences.fasta"),    emit: sequences
+    tuple val(meta), path("go_annotations.tsv"), emit: go_annotations
+    tuple val(meta), path("species.tsv"),        emit: species
 
     script:
     """
@@ -17,13 +17,13 @@ process FETCH_DATA {
 }
 
 process GET_LENGTHS {
-    tag "lengths"
+    tag "${meta.id}"
 
     input:
-    path fasta
+    tuple val(meta), path(fasta)
 
     output:
-    path "lengths.tsv"
+    tuple val(meta), path("lengths.tsv")
 
     script:
     """

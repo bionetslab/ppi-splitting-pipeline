@@ -3,48 +3,53 @@
 include { SAMPLE_NEGATIVES_DEGREE; SAMPLE_NEGATIVES_ILP } from '../modules/negative_sampling'
 
 // Samples negative PPIs for each split, using either the default random
-// sampler or the bias-aware ILP sampler, selected via
-// params.negative_sampling_method.
+// sampler or the bias-aware ILP sampler, selected per-dataset via
+// meta.negative_sampling_method.
 workflow SAMPLE_NEGATIVES {
     take:
-    train_ppis
-    val_ppis
-    test_ppis
-    species_ch
-    go_annotations_ch
+    train_ppis            // tuple(meta, path)
+    val_ppis               // tuple(meta, path)
+    test_ppis               // tuple(meta, path)
+    species_ch              // tuple(meta, path)
+    go_annotations_ch        // tuple(meta, path)
+    candidate_network_ch      // tuple(meta, candidate_network_or_[])
 
     main:
-    if (params.negative_sampling_method == "ilp") {
-        candidate_network_ch = params.candidate_network
-            ? channel.value(file(params.candidate_network, checkIfExists: true))
-            : channel.value([])
-        neg_gurobi_license_ch = params.gurobi_license
-            ? channel.value(file(params.gurobi_license, checkIfExists: true))
-            : channel.value([])
+    // One channel, one process: each (meta, label) item becomes its own
+    // task, so Nextflow runs all four splits for every dataset in parallel.
+    splits_ch = train_ppis.map { meta, f -> tuple(meta, "train", f, 1.0) }
+        .mix(val_ppis.map  { meta, f -> tuple(meta, "val", f, 1.0) })
+        .mix(test_ppis.map { meta, f -> tuple(meta, "test_balanced", f, 1.0) })
+        .mix(test_ppis.map { meta, f -> tuple(meta, "test_realistic", f, 10.0) })
 
-        // One channel, one process: each item (label, positives, neg_ratio)
-        // becomes its own task, so Nextflow runs all four splits in parallel.
-        neg_splits_ch = train_ppis.map { f -> tuple("train", f, 1.0) }
-            .mix(val_ppis.map  { f -> tuple("val", f, 1.0) })
-            .mix(test_ppis.map { f -> tuple("test_balanced", f, 1.0) })
-            .mix(test_ppis.map { f -> tuple("test_realistic", f, 10.0) })
-
-        neg_out = SAMPLE_NEGATIVES_ILP(
-            neg_splits_ch, species_ch, go_annotations_ch, candidate_network_ch, neg_gurobi_license_ch
-        )
-    } else {
-        // One channel, one process: each item (label, positives, ratio, uniform)
-        // becomes its own task, so Nextflow runs all four splits in parallel.
-        neg_splits_ch = train_ppis.map { f -> tuple("train", f, 1.0, false) }
-            .mix(val_ppis.map  { f -> tuple("val", f, 1.0, false) })
-            .mix(test_ppis.map { f -> tuple("test_balanced", f, 1.0, false) })
-            .mix(test_ppis.map { f -> tuple("test_realistic", f, 10.0, true) })
-
-        neg_out = SAMPLE_NEGATIVES_DEGREE(neg_splits_ch)
+    branched = splits_ch.branch { meta, label, f, ratio ->
+        ilp:     meta.negative_sampling_method == "ilp"
+        default: true
     }
 
-    neg_branched = neg_out.labelled.branch {
-        label, f ->
+    neg_gurobi_license_ch = params.gurobi_license
+        ? channel.value(file(params.gurobi_license, checkIfExists: true))
+        : channel.value([])
+
+    // species/go_annotations/candidate_network are one-per-dataset;
+    // combine(by: 0) broadcasts each dataset's single file to every one
+    // of that dataset's (up to 4) splits, rather than a full cross-join.
+    ilp_inputs = branched.ilp
+        .combine(species_ch, by: 0)
+        .combine(go_annotations_ch, by: 0)
+        .combine(candidate_network_ch, by: 0)
+    ilp_out = SAMPLE_NEGATIVES_ILP(ilp_inputs, neg_gurobi_license_ch)
+
+    default_inputs = branched.default.map { meta, label, f, ratio ->
+        tuple(meta, label, f, ratio, label == "test_realistic")
+    }
+    default_out = SAMPLE_NEGATIVES_DEGREE(default_inputs)
+
+    neg_labelled = ilp_out.labelled.mix(default_out.labelled)
+    neg_mqc      = ilp_out.mqc.mix(default_out.mqc)
+
+    neg_branched = neg_labelled.branch {
+        meta, label, f ->
             train:          label == "train"
             val:            label == "val"
             test_balanced:  label == "test_balanced"
@@ -52,9 +57,9 @@ workflow SAMPLE_NEGATIVES {
     }
 
     emit:
-    train          = neg_branched.train.map { label, f -> f }
-    val            = neg_branched.val.map { label, f -> f }
-    test_balanced  = neg_branched.test_balanced.map { label, f -> f }
-    test_realistic = neg_branched.test_realistic.map { label, f -> f }
-    mqc            = neg_out.mqc
+    train          = neg_branched.train.map          { meta, label, f -> tuple(meta, f) }
+    val            = neg_branched.val.map            { meta, label, f -> tuple(meta, f) }
+    test_balanced  = neg_branched.test_balanced.map  { meta, label, f -> tuple(meta, f) }
+    test_realistic = neg_branched.test_realistic.map { meta, label, f -> tuple(meta, f) }
+    mqc            = neg_mqc
 }

@@ -1,49 +1,60 @@
 include { SORT_PPIS; SOLVE_ILP; CDHIT2D; REMOVE_REDUNDANT } from '../modules/splitting'
 
 // Assigns PPIs to train/val/test (via KaHIP-based sorting or the ILP
-// splitter), then removes cross-split redundancy with CD-HIT-2D.
+// splitter, chosen per-dataset via meta.split_method), then removes
+// cross-split redundancy with CD-HIT-2D.
 workflow SPLIT_POSITIVES {
     take:
-    ppis_ch
-    sequences_ch
-    partition_ch
-    node_mapping_ch
+    ppis_ch          // tuple(meta, ppis)
+    sequences_ch     // tuple(meta, fasta)
+    partition_ch     // tuple(meta, partition)
+    node_mapping_ch  // tuple(meta, node_mapping)
 
     main:
-    if (params.split_method == "ilp") {
-        gurobi_license_ch = params.gurobi_license
-            ? channel.value(file(params.gurobi_license, checkIfExists: true))
-            : channel.value([])
-        sorted = SOLVE_ILP(ppis_ch, sequences_ch, partition_ch, node_mapping_ch, gurobi_license_ch)
-    } else {
-        sorted = SORT_PPIS(ppis_ch, partition_ch, sequences_ch, node_mapping_ch)
+    joined = ppis_ch.join(sequences_ch).join(partition_ch).join(node_mapping_ch)
+    // tuple(meta, ppis, fasta, partition, node_mapping)
+
+    branched = joined.branch { meta, ppis, fasta, partition, node_mapping ->
+        ilp:   meta.split_method == "ilp"
+        kahip: true
     }
 
-    // One channel, one process: each (label, fasta1, fasta2) item becomes its
-    // own task, so Nextflow runs both CD-HIT-2D comparisons in parallel.
-    cdhit_inputs_ch = sorted.train_fasta.combine(sorted.val_fasta).map { t, v -> tuple("train_val", t, v) }
-        .mix(sorted.train_fasta.combine(sorted.test_fasta).map { t, te -> tuple("train_test", t, te) })
+    gurobi_license_ch = params.gurobi_license
+        ? channel.value(file(params.gurobi_license, checkIfExists: true))
+        : channel.value([])
+
+    ilp_out   = SOLVE_ILP(branched.ilp, gurobi_license_ch)
+    kahip_out = SORT_PPIS(branched.kahip)
+
+    train_ppis  = ilp_out.train_ppis.mix(kahip_out.train_ppis)
+    val_ppis    = ilp_out.val_ppis.mix(kahip_out.val_ppis)
+    test_ppis   = ilp_out.test_ppis.mix(kahip_out.test_ppis)
+    train_fasta = ilp_out.train_fasta.mix(kahip_out.train_fasta)
+    val_fasta   = ilp_out.val_fasta.mix(kahip_out.val_fasta)
+    test_fasta  = ilp_out.test_fasta.mix(kahip_out.test_fasta)
+    sorted_mqc  = ilp_out.mqc.mix(kahip_out.mqc)
+
+    // One channel, one process: each (meta, label, fasta1, fasta2) item
+    // becomes its own task, so Nextflow runs both CD-HIT-2D comparisons
+    // for every dataset in parallel.
+    cdhit_inputs_ch = train_fasta.join(val_fasta).map { meta, t, v -> tuple(meta, "train_val", t, v) }
+        .mix(train_fasta.join(test_fasta).map { meta, t, te -> tuple(meta, "train_test", t, te) })
 
     cdhit_out = CDHIT2D(cdhit_inputs_ch)
 
     cdhit_branched = cdhit_out.sim.branch {
-        label, f ->
+        meta, label, f ->
             train_val:  label == "train_val"
             train_test: label == "train_test"
     }
-    sim_tv = cdhit_branched.train_val.map { label, f -> f }
-    sim_tt = cdhit_branched.train_test.map { label, f -> f }
+    sim_tv = cdhit_branched.train_val.map { meta, label, f -> tuple(meta, f) }
+    sim_tt = cdhit_branched.train_test.map { meta, label, f -> tuple(meta, f) }
 
-    nr = REMOVE_REDUNDANT(
-        sorted.train_ppis,
-        sorted.val_ppis,
-        sorted.test_ppis,
-        sorted.train_fasta,
-        sorted.val_fasta,
-        sorted.test_fasta,
-        sim_tv,
-        sim_tt
-    )
+    nr_inputs = train_ppis.join(val_ppis).join(test_ppis)
+        .join(train_fasta).join(val_fasta).join(test_fasta)
+        .join(sim_tv).join(sim_tt)
+
+    nr = REMOVE_REDUNDANT(nr_inputs)
 
     emit:
     train_ppis  = nr.train_ppis
@@ -52,6 +63,6 @@ workflow SPLIT_POSITIVES {
     train_fasta = nr.train_fasta
     val_fasta   = nr.val_fasta
     test_fasta  = nr.test_fasta
-    sorted_mqc  = sorted.mqc
+    sorted_mqc  = sorted_mqc
     nr_mqc      = nr.mqc
 }

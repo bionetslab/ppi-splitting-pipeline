@@ -1,25 +1,32 @@
 include { EMBED_SEQUENCES; TRAIN_CLASSIFIER } from '../modules/training'
 
-// Embeds train/val/test sequences (unless a precomputed .npz is supplied via
-// params.embedding_model) and trains the baseline classifier on top of them.
+// Embeds train/val/test sequences (unless a precomputed .npz is supplied
+// per-dataset via meta.embedding_model) and trains the baseline classifier
+// on top of them.
 workflow TRAIN_BASELINE {
     take:
-    train_fasta
-    val_fasta
-    test_fasta
-    train_csv
-    val_csv
-    test_balanced_csv
-    test_realistic_csv
+    train_fasta        // tuple(meta, path)
+    val_fasta            // tuple(meta, path)
+    test_fasta            // tuple(meta, path)
+    train_csv              // tuple(meta, path)
+    val_csv                  // tuple(meta, path)
+    test_balanced_csv          // tuple(meta, path)
+    test_realistic_csv          // tuple(meta, path)
 
     main:
-    if (params.embedding_model in ["none", "esm2", "prot_t5"]) {
-        embeddings = EMBED_SEQUENCES(train_fasta, val_fasta, test_fasta)
-    } else {
-        embeddings = channel.value(file(params.embedding_model, checkIfExists: true))
+    branched = train_fasta.join(val_fasta).join(test_fasta).branch { meta, train, val, test ->
+        compute:     meta.embedding_model in ["none", "esm2", "prot_t5"]
+        precomputed: true
     }
 
-    clf = TRAIN_CLASSIFIER(train_csv, val_csv, test_balanced_csv, test_realistic_csv, embeddings)
+    computed    = EMBED_SEQUENCES(branched.compute)
+    precomputed = branched.precomputed.map { meta, train, val, test ->
+        tuple(meta, file(meta.embedding_model, checkIfExists: true))
+    }
+    embeddings = computed.mix(precomputed)
+
+    clf_inputs = train_csv.join(val_csv).join(test_balanced_csv).join(test_realistic_csv).join(embeddings)
+    clf = TRAIN_CLASSIFIER(clf_inputs)
 
     emit:
     embeddings = embeddings

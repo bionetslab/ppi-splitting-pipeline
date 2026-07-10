@@ -1,36 +1,30 @@
 process EMBED_SEQUENCES {
-    publishDir "${params.outdir}/data"
-    tag "embed"
+    publishDir(path: { "${params.outdir}/${meta.id}/data" })
+    tag "${meta.id}"
     label "process_gpu"
 
     input:
-    path train_fasta
-    path val_fasta
-    path test_fasta
+    tuple val(meta), path(train_fasta), path(val_fasta), path(test_fasta)
 
     output:
-    path "embeddings.npz"
+    tuple val(meta), path("embeddings.npz")
 
     script:
     """
     embed_sequences.py \\
         --fasta ${train_fasta} ${val_fasta} ${test_fasta} \\
-        --model ${params.embedding_model}
+        --model ${meta.embedding_model}
     """
 }
 
 process TRAIN_CLASSIFIER {
-    tag "classifier"
+    tag "${meta.id}"
 
     input:
-    path train_csv
-    path val_csv
-    path test_balanced_csv
-    path test_realistic_csv
-    path embeddings
+    tuple val(meta), path(train_csv), path(val_csv), path(test_balanced_csv), path(test_realistic_csv), path(embeddings)
 
     output:
-    path "classifier_metrics_mqc.tsv", emit: mqc
+    tuple val(meta), path("classifier_metrics_mqc.tsv"), emit: mqc
 
     script:
     """

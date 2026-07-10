@@ -1,19 +1,13 @@
 process BIAS_ANALYSIS {
-    tag "${attribute}"
+    tag "${meta.id}_${attribute}"
 
     input:
-    each attribute
-    path train_csv
-    path val_csv
-    path test_balanced_csv
-    path test_realistic_csv
-    path blast_tsv
-    path embeddings
-    path go_annotations
-    path species
+    tuple val(meta), val(attribute),
+          path(train_csv), path(val_csv), path(test_balanced_csv), path(test_realistic_csv),
+          path(blast_tsv), path(embeddings), path(go_annotations), path(species)
 
     output:
-    path "*_bias_mqc.tsv", emit: mqc, optional: true
+    tuple val(meta), path("*_bias_mqc.tsv"), emit: mqc, optional: true
 
     script:
     """
@@ -32,13 +26,13 @@ process BIAS_ANALYSIS {
 }
 
 process COLLECT_BIAS {
-    tag "bias_scatter"
+    tag "${id}_bias_scatter"
 
     input:
-    path tsvs
+    tuple val(id), path(tsvs)
 
     output:
-    path "bias_scatter_mqc.html", emit: mqc
+    tuple val(id), path("bias_scatter_mqc.html"), emit: mqc
 
     script:
     """
@@ -47,17 +41,14 @@ process COLLECT_BIAS {
 }
 
 process SIMILARITY_HEATMAP {
-    publishDir "${params.outdir}/multiqc", mode: 'copy'
-    tag "heatmap"
+    publishDir(path: { "${params.outdir}/${id}/multiqc" }, mode: 'copy')
+    tag "${id}_heatmap"
 
     input:
-    path train_fasta
-    path val_fasta
-    path test_fasta
-    path blast_tsv
+    tuple val(id), path(train_fasta), path(val_fasta), path(test_fasta), path(blast_tsv)
 
     output:
-    path "similarity_heatmap_mqc.html"
+    tuple val(id), path("similarity_heatmap_mqc.html")
 
     script:
     """
@@ -72,11 +63,11 @@ process SIMILARITY_HEATMAP {
 }
 
 process MULTIQC {
-    publishDir "${params.outdir}/multiqc", mode: 'copy'
-    tag "multiqc"
+    publishDir(path: { "${params.outdir}/${id}/multiqc" }, mode: 'copy')
+    tag "${id}"
 
     input:
-    path mqc_files
+    tuple val(id), path(mqc_files)
 
     output:
     path "multiqc_report.html"
@@ -84,6 +75,6 @@ process MULTIQC {
 
     script:
     """
-    multiqc . --title "PPI Splitting Pipeline" --filename multiqc_report.html
+    multiqc . --title "PPI Splitting Pipeline: ${id}" --filename multiqc_report.html
     """
 }

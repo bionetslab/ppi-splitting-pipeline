@@ -1,13 +1,13 @@
 process SAMPLE_NEGATIVES_DEGREE {
-    publishDir "${params.outdir}", mode: 'copy', saveAs: { f -> f.endsWith('_mqc.tsv') ? null : f }
-    tag "negatives_${label}"
+    publishDir(path: { "${params.outdir}/${meta.id}" }, mode: 'copy', saveAs: { f -> f.endsWith('_mqc.tsv') ? null : f })
+    tag "${meta.id}_${label}"
 
     input:
-    tuple val(label), path(positives), val(ratio), val(uniform)  // label: "train" | "val" | "test_balanced" | "test_realistic"
+    tuple val(meta), val(label), path(positives), val(ratio), val(uniform)  // label: "train" | "val" | "test_balanced" | "test_realistic"
 
     output:
-    tuple val(label), path("${label}.csv"), emit: labelled
-    path "${label}*_mqc.tsv",               emit: mqc
+    tuple val(meta), val(label), path("${label}.csv"), emit: labelled
+    tuple val(meta), path("${label}*_mqc.tsv"),         emit: mqc
 
     script:
     def uniform_flag = uniform ? '--uniform' : ''
@@ -23,19 +23,16 @@ process SAMPLE_NEGATIVES_DEGREE {
 }
 
 process SAMPLE_NEGATIVES_ILP {
-    publishDir "${params.outdir}", mode: 'copy', saveAs: { f -> f.endsWith('_mqc.tsv') ? null : f }
-    tag "negatives_ilp_${label}"
+    publishDir(path: { "${params.outdir}/${meta.id}" }, mode: 'copy', saveAs: { f -> f.endsWith('_mqc.tsv') ? null : f })
+    tag "${meta.id}_${label}"
 
     input:
-    tuple val(label), path(positives), val(neg_ratio)  // label: "train" | "val" | "test_balanced" | "test_realistic"
-    path species
-    path go_annotations
-    path candidate_network  // optional; [] if params.candidate_network is unset
-    path gurobi_license     // optional; [] if params.gurobi_license is unset
+    tuple val(meta), val(label), path(positives), val(neg_ratio), path(species), path(go_annotations), path(candidate_network)  // label: "train" | "val" | "test_balanced" | "test_realistic"; candidate_network optional, [] if unset
+    path gurobi_license  // optional; [] if params.gurobi_license is unset
 
     output:
-    tuple val(label), path("${label}.csv"), emit: labelled
-    path "${label}*_mqc.tsv",               emit: mqc
+    tuple val(meta), val(label), path("${label}.csv"), emit: labelled
+    tuple val(meta), path("${label}*_mqc.tsv"),         emit: mqc
 
     script:
     def cand_arg = candidate_network ? "--candidate-network ${candidate_network}" : ''

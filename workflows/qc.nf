@@ -1,11 +1,11 @@
 include { BIAS_ANALYSIS; COLLECT_BIAS; SIMILARITY_HEATMAP; MULTIQC } from '../modules/qc'
 
 // Runs the per-attribute bias analyses, collects them into a scatter plot,
-// builds the train/val/test similarity heatmap, and assembles the final
-// MultiQC report from every stage's diagnostics.
+// builds the train/val/test similarity heatmap, and assembles one MultiQC
+// report per dataset from every stage's diagnostics.
 workflow QC {
     take:
-    train_ppis
+    train_ppis            // tuple(meta, path)
     val_ppis
     test_balanced_ppis
     test_realistic_ppis
@@ -22,39 +22,49 @@ workflow QC {
     clf_mqc
 
     main:
-    same_species_ch = species_ch
-        .splitCsv(header: true, sep: '\t')
-        .map    { row -> row.taxon_id }
-        .collect()
-        .map    { ids -> ids.unique() }
-        .filter { ids -> ids.size() > 1 }
-        .map    { "same_species" }
+    // Whether to include "same_species" depends on each dataset's own
+    // species.tsv, not the run as a whole, so this is computed per-dataset
+    // (synchronously, via Path.splitCsv() inside the closure) rather than
+    // with a channel-wide collect() like a single-dataset run could get
+    // away with.
+    attrs_ch = species_ch.map { meta, sp ->
+        def taxa = sp.splitCsv(header: true, sep: '\t').collect { it.taxon_id }.unique()
+        def attrs = ["sequence_similarity", "embedding_similarity",
+                     "functional_relatedness_BP", "functional_relatedness_MF",
+                     "functional_relatedness_CC", "self_interactions"]
+        if (taxa.size() > 1) attrs << "same_species"
+        tuple(meta, attrs)
+    }.flatMap { meta, attrs -> attrs.collect { a -> tuple(meta, a) } }
 
-    bias = BIAS_ANALYSIS(
-        channel.of("sequence_similarity", "embedding_similarity",
-                   "functional_relatedness_BP", "functional_relatedness_MF",
-                   "functional_relatedness_CC", "self_interactions")
-               .mix(same_species_ch).collect(),
-        train_ppis,
-        val_ppis,
-        test_balanced_ppis,
-        test_realistic_ppis,
-        blast_out,
-        embeddings,
-        go_annotations_ch,
-        species_ch
-    )
-    scatter = COLLECT_BIAS(bias.mqc.collect())
-    heatmap = SIMILARITY_HEATMAP(train_fasta, val_fasta, test_fasta, blast_out)
+    // train/val/test/blast/embeddings/go/species are one-per-dataset;
+    // combine(by: 0) broadcasts each dataset's single set of files to
+    // every one of that dataset's attributes, rather than a full cross-join.
+    bias_inputs = attrs_ch
+        .combine(train_ppis,          by: 0)
+        .combine(val_ppis,            by: 0)
+        .combine(test_balanced_ppis,  by: 0)
+        .combine(test_realistic_ppis, by: 0)
+        .combine(blast_out,           by: 0)
+        .combine(embeddings,          by: 0)
+        .combine(go_annotations_ch,   by: 0)
+        .combine(species_ch,          by: 0)
 
-    mqc_files = sorted_mqc
-        .mix(nr_mqc)
-        .mix(neg_mqc)
-        .mix(clf_mqc)
-        .mix(bias.mqc)
+    bias = BIAS_ANALYSIS(bias_inputs)
+
+    scatter = COLLECT_BIAS(bias.mqc.map { meta, f -> tuple(meta.id, f) }.groupTuple())
+
+    heatmap_inputs = train_fasta.join(val_fasta).join(test_fasta).join(blast_out)
+        .map { meta, t, v, te, b -> tuple(meta.id, t, v, te, b) }
+    heatmap = SIMILARITY_HEATMAP(heatmap_inputs)
+
+    mqc_files = sorted_mqc.map { meta, f -> tuple(meta.id, f) }
+        .mix(nr_mqc.map  { meta, f -> tuple(meta.id, f) })
+        .mix(neg_mqc.map { meta, f -> tuple(meta.id, f) })
+        .mix(clf_mqc.map { meta, f -> tuple(meta.id, f) })
+        .mix(bias.mqc.map { meta, f -> tuple(meta.id, f) })
         .mix(scatter.mqc)
         .mix(heatmap)
-        .collect()
+        .groupTuple()
 
     MULTIQC(mqc_files)
 }
