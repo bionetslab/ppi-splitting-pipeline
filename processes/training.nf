@@ -1,19 +1,28 @@
+// Datasets that request the same embedding_model share one embedding call
+// over the union of their train/val/test sequences (ESM2/ProtT5 embedding
+// is the most expensive per-protein step, so this avoids recomputing it for
+// proteins that appear in more than one dataset). fasta_files is the flat
+// list of every dataset-in-the-group's train/val/test fasta; stageAs
+// auto-numbers them since every dataset's split fasta is literally named
+// train_nr.fasta/val_nr.fasta/test_nr.fasta and would otherwise collide
+// when staged together. embed_sequences.py already merges/dedupes across
+// however many fasta files it's given.
 process EMBED_SEQUENCES {
-    publishDir(path: { "${params.outdir}/${meta.id}/data" })
-    tag "${meta.id}"
+    publishDir(path: { "${params.outdir}/_shared/embeddings" }, mode: 'copy', saveAs: { f -> "embeddings_${embedding_model}.npz" })
+    tag "embed_${embedding_model}"
     label "process_gpu"
 
     input:
-    tuple val(meta), path(train_fasta), path(val_fasta), path(test_fasta)
+    tuple val(embedding_model), path(fasta_files, stageAs: "input_*")
 
     output:
-    tuple val(meta), path("embeddings.npz")
+    tuple val(embedding_model), path("embeddings.npz")
 
     script:
     """
     embed_sequences.py \\
-        --fasta ${train_fasta} ${val_fasta} ${test_fasta} \\
-        --model ${meta.embedding_model}
+        --fasta ${fasta_files} \\
+        --model ${embedding_model}
     """
 }
 

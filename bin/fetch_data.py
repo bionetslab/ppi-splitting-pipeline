@@ -37,18 +37,19 @@ def _canonical(acc):
     return acc.split("-")[0]
 
 
-def get_unique_proteins(ppis_path):
-    """Return (sorted original IDs, {canonical_id: [original_ids]})."""
-    proteins = set()
-    with open(ppis_path) as fh:
-        reader = csv.DictReader(fh)
-        for row in reader:
-            proteins.add(row["protein1"].strip())
-            proteins.add(row["protein2"].strip())
+def read_protein_list(path):
+    """Return sorted unique protein IDs from a plain text file, one ID per line."""
+    with open(path) as fh:
+        proteins = {line.strip() for line in fh if line.strip()}
+    return sorted(proteins)
+
+
+def build_canonical_map(proteins):
+    """Return {canonical_id: [original_ids]} for a collection of protein IDs."""
     canonical_map = {}
     for acc in proteins:
         canonical_map.setdefault(_canonical(acc), []).append(acc)
-    return sorted(proteins), canonical_map
+    return canonical_map
 
 
 def fetch_isoform_sequence(acc, retries=3):
@@ -232,10 +233,11 @@ def parse_batch(text):
 
 def main():
     if len(sys.argv) != 5:
-        sys.exit(f"Usage: {sys.argv[0]} ppis.csv sequences.fasta go_annotations.tsv species.tsv")
+        sys.exit(f"Usage: {sys.argv[0]} proteins.txt sequences.fasta go_annotations.tsv species.tsv")
 
-    ppis_path, fasta_out, go_out, species_out = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
-    proteins, canonical_map = get_unique_proteins(ppis_path)
+    proteins_path, fasta_out, go_out, species_out = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
+    proteins = read_protein_list(proteins_path)
+    canonical_map = build_canonical_map(proteins)
     canonicals = sorted(canonical_map.keys())
     print(
         f"Fetching data for {len(proteins)} proteins "

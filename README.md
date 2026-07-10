@@ -76,9 +76,9 @@ Each dataset gets its own report: open `results/<id>/multiqc/multiqc_report.html
 
 ### Step descriptions
 
-**FETCH_DATA** — Queries UniProt for all proteins in the input CSV. Retrieves sequences (canonical + isoform-specific via the FASTA endpoint), GO annotations (biological process, molecular function, cellular component), and NCBI taxon IDs. Outputs `sequences.fasta`, `go_annotations.tsv`, and `species.tsv`.
+**FETCH_DATA** — Queries UniProt for all proteins in the input CSV. Retrieves sequences (canonical + isoform-specific via the FASTA endpoint), GO annotations (biological process, molecular function, cellular component), and NCBI taxon IDs. Outputs `sequences.fasta`, `go_annotations.tsv`, and `species.tsv`. When several samplesheet datasets need a fetch, they're merged into one combined PPI list first (`COMBINE_PPIS`) and fetched together exactly once, published to `results/_shared/data/`, then split back out per dataset (`SUBSET_FETCHED_DATA`) — see [Multiple datasets (samplesheet)](#multiple-datasets-samplesheet) below.
 
-**GET_LENGTHS** — Computes per-protein sequence lengths for length-normalized BLAST scores.
+**GET_LENGTHS** — Computes per-protein sequence lengths for length-normalized BLAST scores. Runs once on the shared fetch batch (see above) for datasets needing a fetch, and once per dataset for datasets supplying a precomputed `sequences.fasta`.
 
 **RUN_BLAST** — Runs all-against-all BLASTp with `makeblastdb` + `blastp` to quantify pairwise sequence similarity.
 
@@ -107,6 +107,11 @@ Each dataset gets its own report: open `results/<id>/multiqc/multiqc_report.html
 - `prot_t5` — ProtT5-XL (dimension 1024), mean-pooled over residues
 - A path to a pre-computed `.npz` file skips this step entirely.
 
+Every samplesheet dataset requesting the same model is embedded together in
+one call over the union of their train/val/test sequences, published once to
+`results/_shared/embeddings/embeddings_<model>.npz` (not duplicated per
+dataset).
+
 **TRAIN_CLASSIFIER** — Trains a Random Forest classifier on concatenated pair embeddings. Hyperparameters are tuned on the validation AUROC over 3 configurations (max_depth 5/10/30, max_samples 0.2), then the best model is retrained on train+val and evaluated on the balanced and realistic test sets.
 
 **BIAS_ANALYSIS** — Runs in parallel for each attribute, computing:
@@ -133,22 +138,26 @@ Attributes analyzed:
 
 ## Outputs
 
-Every dataset from the samplesheet gets its own subtree under `--outdir`, named by its `id` column:
+Every dataset from the samplesheet gets its own subtree under `--outdir`, named by its `id` column. Work shared across datasets (the deduplicated UniProt fetch and any embeddings shared by datasets requesting the same model) lives under a separate `_shared/` folder rather than being duplicated into every dataset's subtree:
 
 ```
 results/
+├── _shared/
+│   ├── data/                         # One deduplicated UniProt fetch batch (see Multiple datasets below)
+│   │   └── sequences.fasta, go_annotations.tsv, species.tsv
+│   └── embeddings/
+│       └── embeddings_<model>.npz    # One file per distinct embedding_model requested across datasets
 └── <id>/
     ├── multiqc/
     │   └── multiqc_report.html       # Main report for this dataset
     │   └── similarity_heatmap.html   # Heatmap of pairwise similarity between proteins in different splits
     │   └── multiqc_report_data/      # MultiQC data folder
     ├── data/
-    │   └── embeddings.npz            # Pre-computed embeddings (reusable)
-    │   └── go_annotations.tsv        # GO annotations for all proteins
-    │   └── sequences.fasta           # FASTA for all proteins
-    │   └── species.tsv               # NCBI taxon IDs for all proteins
+    │   └── go_annotations.tsv        # GO annotations for this dataset's own proteins
+    │   └── sequences.fasta           # FASTA for this dataset's own proteins
+    │   └── species.tsv               # NCBI taxon IDs for this dataset's own proteins
     ├── similarities/
-    │   └── all_vs_all.tsv            # BLAST evalue, bitscore and pident between all proteins
+    │   └── all_vs_all.tsv            # BLAST evalue, bitscore and pident between this dataset's own proteins
     │   └── similarity.graph          # KaHIP input graph = all vs. all similarity graph (weighted edges) in METIS format
     │   └── node_mapping.tsv          # KaHIP just enumerates nodes, this maps them to protein IDs
     │   └── partitioned_proteome.txt  # KaHIP partitioned proteome (protein IDs) 
@@ -157,6 +166,13 @@ results/
     ├── test_balanced.csv
     └── test_realistic.csv            # with 1:10 ratio of positives:negatives, negatives are uniformly sampled
 ```
+
+`data/sequences.fasta` (and its `go_annotations.tsv`/`species.tsv`) is
+always this dataset's own subset, even for datasets whose UniProt fetch was
+folded into a shared batch with other datasets — this matters most for
+`similarities/all_vs_all.tsv`, since BLAST's E-value/bitscore statistics
+depend on exactly which proteins are in its search database, so it always
+runs per-dataset even when the underlying sequences came from a shared fetch.
 
 ---
 
@@ -191,6 +207,21 @@ string,data/string.csv,ilp,ilp,0.5,0.5
 Everything else (solver settings, Gurobi license, resource limits, seeds,
 `neg_ilp_degree_bias_mode`, ...) stays a run-wide default in
 `nextflow.config` and is shared by every dataset in the samplesheet.
+
+**Deduplicated work across datasets.** Datasets often overlap in which
+proteins they contain, so two things are computed once per run rather than
+once per dataset:
+- **UniProt fetch**: every dataset that needs a fetch (doesn't supply
+  `sequences`/`go_annotations`/`species`) is merged into one combined PPI
+  list and fetched together, then split back out per dataset. BLAST still
+  runs once per dataset on its own subset — see [Outputs](#outputs) above
+  for why that matters.
+- **Embeddings**: every dataset requesting the same `embedding_model` shares
+  one embedding computation over the union of their sequences.
+
+Both are purely a compute/storage optimization — a dataset in a mixed run
+with others produces the same `train.csv`/`val.csv`/etc. it would if run
+alone.
 
 ---
 
@@ -267,7 +298,7 @@ To investigate which STRING evidence channels explain classifier performance dif
 python bin/analyse_string_channels.py \
     --train      results/<id>/train.csv \
     --test       results/<id>/test_balanced.csv \
-    --embeddings results/<id>/data/embeddings.npz \
+    --embeddings results/_shared/embeddings/embeddings_<model>.npz \
     --out        string_channel_analysis.tsv
 ```
 
