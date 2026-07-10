@@ -30,6 +30,8 @@ def buildDatasetsChannel() {
         "embedding_model", "cdhit_identity", "cdhit_wordsize", "split_method", "edge_weight",
         "kahip_k", "ilp_kahip_k", "train_split", "val_split", "test_split", "ilp_epsilon",
         "negative_sampling_method",
+        "neg_ilp_alpha_confidence", "neg_ilp_alpha_bias", "neg_ilp_lambda_degree",
+        "neg_ilp_lambda_taxon_pair", "neg_ilp_lambda_self_loop", "neg_ilp_lambda_jaccard",
     ]
     def rows = samplesheetToList(params.samplesheet, "${projectDir}/assets/schema_input.json")
 
@@ -50,6 +52,12 @@ def buildDatasetsChannel() {
             test_split               : isGiven(row.test_split)               ? row.test_split               : params.test_split,
             ilp_epsilon              : isGiven(row.ilp_epsilon)              ? row.ilp_epsilon              : params.ilp_epsilon,
             negative_sampling_method : isGiven(row.negative_sampling_method) ? row.negative_sampling_method : params.negative_sampling_method,
+            neg_ilp_alpha_confidence : isGiven(row.neg_ilp_alpha_confidence)  ? row.neg_ilp_alpha_confidence  : params.neg_ilp_alpha_confidence,
+            neg_ilp_alpha_bias       : isGiven(row.neg_ilp_alpha_bias)        ? row.neg_ilp_alpha_bias        : params.neg_ilp_alpha_bias,
+            neg_ilp_lambda_degree    : isGiven(row.neg_ilp_lambda_degree)     ? row.neg_ilp_lambda_degree     : params.neg_ilp_lambda_degree,
+            neg_ilp_lambda_taxon_pair: isGiven(row.neg_ilp_lambda_taxon_pair) ? row.neg_ilp_lambda_taxon_pair : params.neg_ilp_lambda_taxon_pair,
+            neg_ilp_lambda_self_loop : isGiven(row.neg_ilp_lambda_self_loop)  ? row.neg_ilp_lambda_self_loop  : params.neg_ilp_lambda_self_loop,
+            neg_ilp_lambda_jaccard   : isGiven(row.neg_ilp_lambda_jaccard)    ? row.neg_ilp_lambda_jaccard    : params.neg_ilp_lambda_jaccard,
         ]
         tuple(meta,
             file(row.ppis, checkIfExists: true),

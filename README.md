@@ -139,12 +139,22 @@ results/
 └── <id>/
     ├── multiqc/
     │   └── multiqc_report.html       # Main report for this dataset
+    │   └── similarity_heatmap.html   # Heatmap of pairwise similarity between proteins in different splits
+    │   └── multiqc_report_data/      # MultiQC data folder
     ├── data/
     │   └── embeddings.npz            # Pre-computed embeddings (reusable)
+    │   └── go_annotations.tsv        # GO annotations for all proteins
+    │   └── sequences.fasta           # FASTA for all proteins
+    │   └── species.tsv               # NCBI taxon IDs for all proteins
+    ├── similarities/
+    │   └── all_vs_all.tsv            # BLAST evalue, bitscore and pident between all proteins
+    │   └── similarity.graph          # KaHIP input graph = all vs. all similarity graph (weighted edges) in METIS format
+    │   └── node_mapping.tsv          # KaHIP just enumerates nodes, this maps them to protein IDs
+    │   └── partitioned_proteome.txt  # KaHIP partitioned proteome (protein IDs) 
     ├── train.csv                     # Final labelled splits (positives + negatives)
     ├── val.csv
     ├── test_balanced.csv
-    └── test_realistic.csv
+    └── test_realistic.csv            # with 1:10 ratio of positives:negatives, negatives are uniformly sampled
 ```
 
 ---
@@ -158,9 +168,9 @@ it possible to process several datasets with different parameters in a single
 `nextflow run` invocation, all running in parallel:
 
 ```
-id,ppis,split_method,negative_sampling_method,cdhit_identity
-hippie,data/HIPPIE-current.csv,,,
-string,data/string.csv,ilp,ilp,0.5
+id,ppis,split_method,negative_sampling_method,cdhit_identity,neg_ilp_lambda_jaccard
+hippie,data/HIPPIE-current.csv,,,,
+string,data/string.csv,ilp,ilp,0.5,0.5
 ```
 
 | Column                                                                 | Overrides                   | Notes                                                                                                                            |
@@ -174,9 +184,11 @@ string,data/string.csv,ilp,ilp,0.5
 | `split_method`, `edge_weight`, `kahip_k`, `ilp_kahip_k`, `ilp_epsilon` | `params.*` of the same name | Defaults: `split_method`: kahip (k=3), `edge_weight`: normalized_bitscore, `kahip_k`: 3, `ilp_kahip_k`: 100, `ilp_epsilon`: 0.05 |
 | `train_split`, `val_split`, `test_split`                               | `params.*` of the same name | Defaults: 0.8, 0.1, 0.1                                                                                                          |
 | `negative_sampling_method`                                             | `params.*` of the same name | Defaults: default (alternative: ilp)                                                                                             |
+| `neg_ilp_alpha_confidence`, `neg_ilp_alpha_bias`                       | `params.*` of the same name | Only used when `negative_sampling_method` is `ilp`; see [Bias-aware ILP negative sampling](#bias-aware-ilp-negative-sampling-optional) below. Highly dataset-specific, so overridable per row rather than fixed run-wide. |
+| `neg_ilp_lambda_degree`, `neg_ilp_lambda_taxon_pair`, `neg_ilp_lambda_self_loop`, `neg_ilp_lambda_jaccard` | `params.*` of the same name | Same as above.                                                                                                    |
 
-Everything else (solver settings, Gurobi license, resource limits, seeds, the
-ILP negative sampler's bias-weighting terms, ...) stays a run-wide default in
+Everything else (solver settings, Gurobi license, resource limits, seeds,
+`neg_ilp_degree_bias_mode`, ...) stays a run-wide default in
 `nextflow.config` and is shared by every dataset in the samplesheet.
 
 ---
@@ -201,6 +213,15 @@ Enable it with:
 ```bash
 nextflow run main.nf --negative_sampling_method ilp
 ```
+
+The `--neg_ilp_alpha_*` and `--neg_ilp_lambda_*` weights are highly
+dataset-specific (they depend on each dataset's degree distribution, taxon
+composition, and GO annotation coverage), so when running multiple datasets
+via `--samplesheet` they are set **per row**, not as a single run-wide value —
+see the samplesheet column reference in
+[Multiple datasets (samplesheet)](#multiple-datasets-samplesheet) above. The
+values below are just the `nextflow.config` fallback used for any row that
+leaves them blank.
 
 | Parameter                                           | Default       | Description                                                                                                                                                                  |
 |-----------------------------------------------------|---------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|

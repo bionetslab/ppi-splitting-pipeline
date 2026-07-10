@@ -1,0 +1,3 @@
+id,ppis,sequences,go_annotations,species,blast_results,candidate_network,embedding_model,cdhit_identity,cdhit_wordsize,split_method,edge_weight,kahip_k,ilp_kahip_k,train_split,val_split,test_split,ilp_epsilon,negative_sampling_method,neg_ilp_alpha_confidence,neg_ilp_alpha_bias,neg_ilp_lambda_degree,neg_ilp_lambda_taxon_pair,neg_ilp_lambda_self_loop,neg_ilp_lambda_jaccard
+test_default,data/test_ppis.csv,,,,,,,,,,,,,,,,,,,,,,,
+test_ilp,data/test_ppis.csv,,,,,,,,,,,,,,,,,ilp,0.2,0.8,4.0,4.0,0.02,0.5

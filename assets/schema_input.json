@@ -1,0 +1,142 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "PPI splitting pipeline samplesheet schema",
+  "description": "One row per PPI dataset. Only 'id' and 'ppis' are required; every other column may be left blank to fall back to the corresponding value in nextflow.config.",
+  "type": "array",
+  "items": {
+    "type": "object",
+    "properties": {
+      "id": {
+        "type": "string",
+        "pattern": "^\\S+$",
+        "errorMessage": "id must be a single whitespace-free token, unique across rows"
+      },
+      "ppis": {
+        "type": "string",
+        "format": "file-path",
+        "exists": true,
+        "errorMessage": "ppis must be a path to an existing PPI CSV file",
+        "pattern": "^.*\\.csv$"
+      },
+      "sequences": {
+        "type": "string",
+        "format": "file-path",
+        "exists": true,
+        "errorMessage": "If supplied, sequences must be a fasta file sequences.fasta",
+        "pattern": "sequences\\.fasta$"
+      },
+      "go_annotations": {
+        "type": "string",
+        "format": "file-path",
+        "exists": true,
+        "errorMessage": "If supplied, go_annotations must be a path to an existing GO annotation file go_annotations.tsv",
+        "pattern": "go_annotations\\.tsv$"
+      },
+      "species": {
+        "type": "string",
+        "format": "file-path",
+        "exists": true,
+        "errorMessage": "If supplied, species must be a path to an existing species file species.tsv",
+        "pattern": "species\\.tsv$"
+      },
+      "blast_results": {
+        "type": "string",
+        "format": "file-path",
+        "exists": true,
+        "errorMessage": "If supplied, blast_results must be a path to an existing BLAST results file all_vs_all.tsv",
+        "pattern": "all_vs_all\\.tsv$"
+      },
+      "candidate_network": {
+        "type": "string",
+        "format": "file-path",
+        "exists": true,
+        "errorMessage": "If supplied, must be a path to a csv containing scores for negative candidates with columns protein1,protein2,w",
+        "pattern": "^*\\.csv$"
+      },
+      "embedding_model": {
+        "type": "string",
+        "errorMessage": "embedding_model must be 'none', 'esm2', 'prot_t5', or a path to a precomputed .npz",
+        "pattern": "^(none|esm2|prot_t5|.*\\.npz)$"
+      },
+      "cdhit_identity": {
+        "type": "number",
+        "minimum": 0.4,
+        "maximum": 1.0
+      },
+      "cdhit_wordsize": {
+        "type": "integer",
+        "minimum": 2,
+        "maximum": 5
+      },
+      "split_method": {
+        "type": "string",
+        "enum": ["kahip", "ilp"]
+      },
+      "edge_weight": {
+        "type": "string",
+        "enum": ["bitscore", "normalized_bitscore"]
+      },
+      "kahip_k": {
+        "type": "integer",
+        "minimum": 3,
+        "maximum": 3
+      },
+      "ilp_kahip_k": {
+        "type": "integer",
+        "minimum": 3,
+        "maximum": 1000
+      },
+      "train_split": {
+        "type": "number",
+        "minimum": 0,
+        "maximum": 1
+      },
+      "val_split": {
+        "type": "number",
+        "minimum": 0,
+        "maximum": 1
+      },
+      "test_split": {
+        "type": "number",
+        "minimum": 0,
+        "maximum": 1
+      },
+      "ilp_epsilon": {
+        "type": "number",
+        "minimum": 0.01,
+        "maximum": 0.5
+      },
+      "negative_sampling_method": {
+        "type": "string",
+        "enum": ["default", "ilp"]
+      },
+      "neg_ilp_alpha_confidence": {
+        "type": "number",
+        "minimum": 0,
+        "maximum": 1
+      },
+      "neg_ilp_alpha_bias": {
+        "type": "number",
+        "minimum": 0,
+        "maximum": 1
+      },
+      "neg_ilp_lambda_degree": {
+        "type": "number",
+        "minimum": 0
+      },
+      "neg_ilp_lambda_taxon_pair": {
+        "type": "number",
+        "minimum": 0
+      },
+      "neg_ilp_lambda_self_loop": {
+        "type": "number",
+        "minimum": 0
+      },
+      "neg_ilp_lambda_jaccard": {
+        "type": "number",
+        "minimum": 0
+      }
+    },
+    "required": ["id", "ppis"]
+  }
+}

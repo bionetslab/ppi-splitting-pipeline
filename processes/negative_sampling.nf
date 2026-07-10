@@ -47,12 +47,12 @@ process SAMPLE_NEGATIVES_ILP {
         --go-annotations     ${go_annotations} \\
         ${cand_arg} \\
         ${lic_arg} \\
-        --alpha-confidence   ${params.neg_ilp_alpha_confidence} \\
-        --alpha-bias         ${params.neg_ilp_alpha_bias} \\
-        --lambda-degree      ${params.neg_ilp_lambda_degree} \\
-        --lambda-taxon-pair  ${params.neg_ilp_lambda_taxon_pair} \\
-        --lambda-self-loop   ${params.neg_ilp_lambda_self_loop} \\
-        --lambda-jaccard     ${params.neg_ilp_lambda_jaccard} \\
+        --alpha-confidence   ${meta.neg_ilp_alpha_confidence} \\
+        --alpha-bias         ${meta.neg_ilp_alpha_bias} \\
+        --lambda-degree      ${meta.neg_ilp_lambda_degree} \\
+        --lambda-taxon-pair  ${meta.neg_ilp_lambda_taxon_pair} \\
+        --lambda-self-loop   ${meta.neg_ilp_lambda_self_loop} \\
+        --lambda-jaccard     ${meta.neg_ilp_lambda_jaccard} \\
         --degree-bias-mode   ${params.neg_ilp_degree_bias_mode} \\
         --solver             ${params.neg_ilp_solver} \\
         --time-limit         ${params.neg_ilp_time_limit} \\
