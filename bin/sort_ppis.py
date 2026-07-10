@@ -14,50 +14,34 @@ import sys
 from collections import defaultdict
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from utils import read_fasta, read_node_mapping, read_partition, read_ppis, write_fasta, write_ppi_csv
+from utils import mqc_category, read_fasta, read_node_mapping, read_partition, read_ppis, write_fasta, write_ppi_csv
 
 
-def write_mqc(n_input, n_proteins_input, split_results):
-    n_ppis_assigned     = sum(r["n_ppis"]     for r in split_results)
-    n_proteins_assigned = sum(r["n_proteins"] for r in split_results)
-    n_ppis_discarded     = n_input         - n_ppis_assigned
-    n_proteins_discarded = n_proteins_input - n_proteins_assigned
-
-    with open("sort_ppis_gs_mqc.tsv", "w") as fh:
-        fh.write(
-            "# id: 'split_generalstats'\n"
-            "# plot_type: 'generalstats'\n"
-            "# pconfig:\n"
-            "#     - n_ppis_discarded_kahip:\n"
-            "#         title: 'PPIs discarded (KaHIP)'\n"
-            "#         description: 'Cross-partition PPIs discarded during KaHIP partitioning (total, same for all splits)'\n"
-            "#         format: '{:,.0f}'\n"
-            "#         scale: 'Greys'\n"
-            "#     - n_proteins_discarded_kahip:\n"
-            "#         title: 'Proteins discarded (KaHIP)'\n"
-            "#         description: 'Proteins whose every PPI was cross-partition and thus discarded by KaHIP (total, same for all splits)'\n"
-            "#         format: '{:,.0f}'\n"
-            "#         scale: 'Greys'\n"
-            "Sample\tn_ppis_discarded_kahip\tn_proteins_discarded_kahip\n"
-        )
-        for r in split_results:
-            fh.write(f"{r['name']}\t{n_ppis_discarded}\t{n_proteins_discarded}\n")
-
+def write_mqc(split_results, id_, n_ppis_discarded):
+    """Write the PPI-Partitioning-bar MultiQC contribution for a dataset whose
+    split assignment is NOT followed by CD-HIT redundancy removal -- i.e.
+    only ever called from sort_ppis_random.py (split_method=random), where
+    n_ppis_discarded is trivially 0 (random never discards a PPI). For
+    kahip/ilp, REMOVE_REDUNDANT is the sole contributor to this same
+    per-dataset "split_bar_{id_}" id instead, since it alone knows the
+    post-CD-HIT counts needed for the "Discarded (CD-HIT-2D)" series."""
     with open("sort_ppis_bar_mqc.tsv", "w") as fh:
         fh.write(
-            "# id: 'split_bar'\n"
-            "# section_name: 'PPI Partitioning'\n"
-            f"# description: 'Of {n_input:,} input PPIs ({n_proteins_input:,} proteins), {n_ppis_assigned:,} PPIs ({n_proteins_assigned:,} proteins) were assigned to a split and {n_ppis_discarded:,} PPIs ({n_proteins_discarded:,} proteins) were discarded because their interactions were cross-partition.'\n"
+            f"# id: 'split_bar_{id_}'\n"
+            f"# section_name: 'PPI Partitioning: {id_}'\n"
+            "# description: 'PPI counts per split. The discarded bar is coloured by why "
+            "a PPI never made it into a split: cross-partition (KaHIP/ILP) or removed by "
+            "CD-HIT-2D redundancy filtering.'\n"
             "# plot_type: 'bargraph'\n"
             "# pconfig:\n"
-            "#     id: 'split_bar_plot'\n"
-            "#     title: 'PPI Partitioning: edges per split'\n"
+            f"#     id: 'split_bar_plot_{id_}'\n"
+            f"#     title: 'PPI Partitioning: edges per split ({id_})'\n"
             "#     ylab: '# PPIs'\n"
-            "Sample\tPPIs\n"
+            "Sample\tKept\tDiscarded (KaHIP/ILP)\tDiscarded (CD-HIT-2D)\n"
         )
         for r in split_results:
-            fh.write(f"{r['name']}\t{r['n_ppis']}\n")
-        fh.write(f"discarded\t{n_ppis_discarded}\n")
+            fh.write(f"{mqc_category(r['name'])}\t{r['n_ppis']}\t0\t0\n")
+        fh.write(f"{mqc_category('discarded')}\t0\t{n_ppis_discarded}\t0\n")
 
 
 
@@ -80,7 +64,6 @@ def main():
     }
 
     ppis = read_ppis(args.ppis)
-    all_proteins = {p for row in ppis for p in (row["protein1"], row["protein2"])}
     seqs = read_fasta(args.fasta)
 
     # Bucket intra-partition PPIs
@@ -112,7 +95,12 @@ def main():
         print(f"{name}: {len(rows)} PPIs, {len(proteins)} proteins", file=sys.stderr)
         split_results.append({"name": name, "n_ppis": len(rows), "n_proteins": len(proteins)})
 
-    write_mqc(len(ppis), len(all_proteins), split_results)
+    n_ppis_assigned = sum(r["n_ppis"] for r in split_results)
+    print(
+        f"{len(ppis) - n_ppis_assigned} of {len(ppis)} PPIs discarded (cross-partition); "
+        "PPI Partitioning chart is written by REMOVE_REDUNDANT, which runs next.",
+        file=sys.stderr,
+    )
 
 
 

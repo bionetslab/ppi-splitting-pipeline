@@ -18,7 +18,8 @@ process SAMPLE_NEGATIVES_DEGREE {
         --split-name ${label} \\
         --ratio      ${ratio} \\
         ${uniform_flag} \\
-        --seed       ${params.seed}
+        --seed       ${params.seed} \\
+        --id         ${meta.id}
     """
 }
 
@@ -62,6 +63,7 @@ process SAMPLE_NEGATIVES_ILP {
         --diagnostics-out    ${label}_mqc.tsv \\
         --residuals-out      ${label}_residuals_mqc.tsv \\
         --max-candidates    200000 \\
-        --verbose
+        --verbose \\
+        --id                 ${meta.id}
     """
 }

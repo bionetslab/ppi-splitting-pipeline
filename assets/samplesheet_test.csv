@@ -1,5 +1,5 @@
 id,ppis,embedding_model,split_method,ilp_kahip_k,ilp_max_sec,neg_ilp_time_limit,negative_sampling_method,neg_ilp_alpha_confidence,neg_ilp_alpha_bias,neg_ilp_lambda_degree,neg_ilp_lambda_taxon_pair,neg_ilp_lambda_self_loop,neg_ilp_lambda_jaccard
-test_default,data/test_ppis.csv,none,,,60,60,,,,,,,
-test_ilp_split,data/test_ppis.csv,none,ilp,10,60,60,,,,,,,
-test_ilp_sampling,data/test_ppis.csv,none,ilp,10,60,60,ilp,0.0,1.0,4.0,4.0,0.02,0.5
-test_naive,data/test_ppis.csv,none,random,,60,60,uniform,,,,,,
+Blackbox_split,data/test_ppis.csv,none,,,60,60,,,,,,,
+ILP_split,data/test_ppis.csv,none,ilp,10,60,60,,,,,,,
+ILP_split_and_sampling,data/test_ppis.csv,none,ilp,10,60,60,ilp,0.0,1.0,4.0,4.0,0.02,0.5
+Leakage_split,data/test_ppis.csv,none,random,,60,60,uniform,,,,,,

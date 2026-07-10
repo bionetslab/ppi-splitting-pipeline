@@ -65,7 +65,7 @@ Config example for an HPC with slurm and a dedicated GPU queue: https://nf-co.re
 
 ### 4. View the report
 
-Each dataset gets its own report: open `results/<id>/multiqc/multiqc_report.html` in a browser.
+One combined report for the whole run: open `results/multiqc/multiqc_report.html` in a browser. Content that's comparable across datasets (General Statistics, Classifier Performance, Positive vs Negative Pairs) is merged into one table/chart with an `ID` column identifying the dataset; content that's inherently per-dataset (PPI Partitioning, the similarity heatmap, the bias-analysis scatter plot) appears as its own separate, dataset-labelled panel.
 
 ---
 
@@ -97,7 +97,7 @@ Each dataset gets its own report: open `results/<id>/multiqc/multiqc_report.html
 
 **CDHIT2D** – Calls CD-HIT 2D between train/val and train/test to identify proteins in val/test that are too similar to any training protein (above the CD-HIT identity threshold). Writes a TSV of redundant proteins for each split. Only runs for `kahip`/`ilp` splits.
 
-**REMOVE_REDUNDANT** — Removes proteins from val and test that are too similar to any training protein using the CD-HIT 2D TSVs. Only runs for `kahip`/`ilp` splits.
+**REMOVE_REDUNDANT** — Removes proteins from val and test that are too similar to any training protein using the CD-HIT 2D TSVs. Only runs for `kahip`/`ilp` splits. Its kept-vs-removed counts feed into the same "PPI Partitioning" chart `SORT_PPIS`/`SOLVE_ILP` started (stacked `Kept` vs `Removed (CD-HIT)` for the `train`/`val`/`test` bars).
 
 **SAMPLE_NEGATIVES_DEGREE** — Samples random negative pairs for each split. By default, negatives are drawn such that each protein's degree distribution is approximately preserved, producing a balanced test set (1:1 positive:negative) and a realistic test set (1:10 ratio). With `negative_sampling_method=uniform`, endpoints are instead drawn fully uniformly at random for *every* split (not just the realistic test set) — see [Naive baseline: the topology shortcut](#naive-baseline-the-topology-shortcut-optional) below.
 
@@ -135,13 +135,13 @@ Attributes analyzed:
 
 **SIMILARITY_HEATMAP** — Plots a heatmap of pairwise BLASTp similarity between proteins in different splits, to visualize the degree of leakage.
 
-**MULTIQC** — Collects all `*_mqc.tsv` and `*_mqc.html` files into a single MultiQC report.
+**MULTIQC** — Collects every dataset's `*_mqc.tsv`/`*_mqc.html` files into one combined report for the whole run (`results/multiqc/`). Per-attribute bias tables are excluded (the bias-scatter plot supersedes them); General Statistics, Classifier Performance, and Positive vs Negative Pairs are merged across datasets (qualified sample names + an `ID` column); PPI Partitioning, the similarity heatmap, and the bias-scatter plot remain one separate panel per dataset.
 
 ---
 
 ## Outputs
 
-Every dataset from the samplesheet gets its own subtree under `--outdir`, named by its `id` column. Work shared across datasets (the deduplicated UniProt fetch and any embeddings shared by datasets requesting the same model) lives under a separate `_shared/` folder rather than being duplicated into every dataset's subtree:
+Every dataset from the samplesheet gets its own subtree under `--outdir`, named by its `id` column. Work shared across datasets (the deduplicated UniProt fetch and any embeddings shared by datasets requesting the same model) lives under a separate `_shared/` folder rather than being duplicated into every dataset's subtree. The combined MultiQC report for the whole run lives at the top level, `results/multiqc/`:
 
 ```
 results/
@@ -150,11 +150,12 @@ results/
 │   │   └── sequences.fasta, go_annotations.tsv, species.tsv
 │   └── embeddings/
 │       └── embeddings_<model>.npz    # One file per distinct embedding_model requested across datasets
+├── multiqc/
+│   ├── multiqc_report.html           # One combined report for the whole run
+│   └── multiqc_report_data/          # MultiQC data folder
 └── <id>/
     ├── multiqc/
-    │   └── multiqc_report.html       # Main report for this dataset
-    │   └── similarity_heatmap.html   # Heatmap of pairwise similarity between proteins in different splits
-    │   └── multiqc_report_data/      # MultiQC data folder
+    │   └── similarity_heatmap.html   # Standalone copy of this dataset's heatmap (also embedded in the combined report)
     ├── data/
     │   └── go_annotations.tsv        # GO annotations for this dataset's own proteins
     │   └── sequences.fasta           # FASTA for this dataset's own proteins
@@ -215,10 +216,10 @@ Everything else (solver settings, Gurobi license, resource limits, seeds,
 proteins they contain, so two things are computed once per run rather than
 once per dataset:
 - **UniProt fetch**: every dataset that needs a fetch (doesn't supply
-  `sequences`/`go_annotations`/`species`) is merged into one combined PPI
-  list and fetched together, then split back out per dataset. BLAST still
-  runs once per dataset on its own subset — see [Outputs](#outputs) above
-  for why that matters.
+  `sequences`/`go_annotations`/`species`) has its unique proteins extracted
+  and pooled with every other such dataset's, fetched together once, then
+  split back out per dataset. BLAST still runs once per dataset on its own
+  subset — see [Outputs](#outputs) above for why that matters.
 - **Embeddings**: every dataset requesting the same `embedding_model` shares
   one embedding computation over the union of their sequences.
 

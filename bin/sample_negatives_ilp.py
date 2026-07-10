@@ -25,7 +25,7 @@ import scipy.sparse as sp
 import cvxpy as cp
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from utils import read_ppis  # noqa: E402
+from utils import mqc_sample, read_ppis  # noqa: E402
 
 # Hard cap on each protein's total negative degree, enforced as an ILP
 # constraint (see build_problem): mx_p <= neg_ratio * (1 + MAX_DEGREE_EPSILON)
@@ -104,6 +104,7 @@ def parse_args(argv=None) -> argparse.Namespace:
                      help="Per-protein degree residual TSV, written only with --verbose")
     ap.add_argument("--strict-weights", action="store_true")
     ap.add_argument("--verbose", action="store_true")
+    ap.add_argument("--id", required=True, help="Dataset ID, for MultiQC tagging")
 
     return ap.parse_args(argv)
 
@@ -1161,23 +1162,79 @@ DIAG_COLUMNS = ["split", "n_pos", "n_neg", "r", "n_candidates", "obj_value",
                 "mip_gap", "status", "degree_bias_mode"]
 
 
-def write_diagnostics(rows, out_path) -> None:
+def write_diagnostics(rows, out_path, id_) -> None:
+    """Sample/ID qualify each row so this merges cleanly across datasets in
+    the combined MultiQC report, like Classifier Performance."""
+    fieldnames = ["Sample", "ID"] + DIAG_COLUMNS
     with open(out_path, "w", newline="") as fh:
-        writer = csv.DictWriter(fh, fieldnames=DIAG_COLUMNS, delimiter="\t")
+        fh.write(
+            "# id: 'neg_ilp_diagnostics'\n"
+            "# section_name: 'ILP Negative Sampler Diagnostics'\n"
+            "# plot_type: 'table'\n"
+            "# pconfig:\n"
+            "#     id: 'neg_ilp_diagnostics_table'\n"
+            "#     title: 'ILP Negative Sampler Diagnostics'\n"
+        )
+        writer = csv.DictWriter(fh, fieldnames=fieldnames, delimiter="\t")
         writer.writeheader()
         for row in rows:
-            writer.writerow({k: row.get(k, "") for k in DIAG_COLUMNS})
+            out = {k: row.get(k, "") for k in DIAG_COLUMNS}
+            out["Sample"] = mqc_sample(id_, row.get("split", ""))
+            out["ID"] = id_
+            writer.writerow(out)
+
+
+def write_neg_generalstats(diag, out_path, id_) -> None:
+    """Contribute to the same shared 'neg_generalstats' id sample_negatives.py
+    writes to, so ILP-sampled datasets show up in the combined General
+    Statistics table too, uniformly with the degree-weighted sampler."""
+    sample = mqc_sample(id_, diag.get("split", ""))
+    with open(out_path, "w") as fh:
+        fh.write(
+            "# id: 'neg_generalstats'\n"
+            "# plot_type: 'generalstats'\n"
+            "# pconfig:\n"
+            "#     - ID:\n"
+            "#         title: 'ID'\n"
+            "#         description: 'Dataset ID'\n"
+            "#     - n_positives:\n"
+            "#         title: 'Positives'\n"
+            "#         description: 'Positive PPIs in the split'\n"
+            "#         format: '{:,.0f}'\n"
+            "#         scale: 'Blues'\n"
+            "#     - n_negatives:\n"
+            "#         title: 'Negatives'\n"
+            "#         description: 'Sampled negatives for the split'\n"
+            "#         format: '{:,.0f}'\n"
+            "#         scale: 'Oranges'\n"
+            "Sample\tID\tn_positives\tn_negatives\n"
+            f"{sample}\t{id_}\t{diag.get('n_pos', '')}\t{diag.get('n_neg', '')}\n"
+        )
 
 
 RESIDUAL_COLUMNS = ["split", "protein_id", "taxon", "d_plus", "d_minus", "residual"]
 
 
-def write_residuals(rows, out_path) -> None:
+def write_residuals(rows, out_path, id_) -> None:
+    """Same Sample/ID qualification as write_diagnostics; residuals are
+    per-protein so Sample also includes protein_id to stay unique."""
+    fieldnames = ["Sample", "ID"] + RESIDUAL_COLUMNS
     with open(out_path, "w", newline="") as fh:
-        writer = csv.DictWriter(fh, fieldnames=RESIDUAL_COLUMNS, delimiter="\t")
+        fh.write(
+            "# id: 'neg_ilp_residuals'\n"
+            "# section_name: 'ILP Negative Sampler Residuals'\n"
+            "# plot_type: 'table'\n"
+            "# pconfig:\n"
+            "#     id: 'neg_ilp_residuals_table'\n"
+            "#     title: 'ILP Negative Sampler: per-protein degree residuals'\n"
+        )
+        writer = csv.DictWriter(fh, fieldnames=fieldnames, delimiter="\t")
         writer.writeheader()
         for row in rows:
-            writer.writerow({k: row.get(k, "") for k in RESIDUAL_COLUMNS})
+            out = {k: row.get(k, "") for k in RESIDUAL_COLUMNS}
+            out["Sample"] = f"{mqc_sample(id_, row.get('split', ''))}_{row.get('protein_id', '')}"
+            out["ID"] = id_
+            writer.writerow(out)
 
 
 # ============================================================
@@ -1320,6 +1377,7 @@ if __name__ == "__main__":
         protein_to_idx=protein_to_idx, idx_to_protein=idx_to_protein,
         verbose_rows_out=residual_rows,
     )
-    write_diagnostics([diag], args.diagnostics_out)
+    write_diagnostics([diag], args.diagnostics_out, args.id)
+    write_neg_generalstats(diag, f"{split_name}_gs_mqc.tsv", args.id)
     if cfg.verbose and residual_rows:
-        write_residuals(residual_rows, args.residuals_out)
+        write_residuals(residual_rows, args.residuals_out, args.id)

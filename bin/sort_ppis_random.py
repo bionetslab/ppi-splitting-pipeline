@@ -32,10 +32,10 @@ def main():
     ap.add_argument("--val-split",     type=float, default=0.1)
     ap.add_argument("--test-split",    type=float, default=0.1)
     ap.add_argument("--seed",          type=int, default=42)
+    ap.add_argument("--id", required=True, help="Dataset ID, for MultiQC tagging")
     args = ap.parse_args()
 
     ppis = read_ppis(args.ppis)
-    all_proteins = {p for row in ppis for p in (row["protein1"], row["protein2"])}
     seqs = read_fasta(args.fasta)
 
     shuffled = ppis[:]
@@ -60,7 +60,8 @@ def main():
         print(f"{name}: {len(rows)} PPIs, {len(proteins)} proteins", file=sys.stderr)
         split_results.append({"name": name, "n_ppis": len(rows), "n_proteins": len(proteins)})
 
-    write_mqc(len(ppis), len(all_proteins), split_results)
+    # Random splitting never discards a PPI, by construction.
+    write_mqc(split_results, args.id, n_ppis_discarded=0)
 
 
 if __name__ == "__main__":

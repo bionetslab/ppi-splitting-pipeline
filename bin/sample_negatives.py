@@ -24,7 +24,7 @@ import sys
 from collections import defaultdict
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from utils import read_ppis
+from utils import mqc_sample, read_ppis
 
 
 def _positive_set(rows):
@@ -85,14 +85,19 @@ def write_combined(pos_rows, negatives, path):
             writer.writerow(out)
 
 
-def write_mqc(split_name, n_positives, n_negatives, gs_out, bar_out):
-    # Sharing the same 'id' across all four splits' files lets MultiQC merge
-    # them into one combined general-stats table / bar plot.
+def write_mqc(split_name, n_positives, n_negatives, gs_out, bar_out, id_):
+    # Sharing the same 'id' across all datasets' files lets MultiQC merge
+    # them into one combined general-stats table / bar plot; Sample is
+    # qualified by dataset so rows/categories don't collide across datasets.
+    sample = mqc_sample(id_, split_name)
     with open(gs_out, "w") as fh:
         fh.write(
             "# id: 'neg_generalstats'\n"
             "# plot_type: 'generalstats'\n"
             "# pconfig:\n"
+            "#     - ID:\n"
+            "#         title: 'ID'\n"
+            "#         description: 'Dataset ID'\n"
             "#     - n_positives:\n"
             "#         title: 'Positives'\n"
             "#         description: 'Positive PPIs in the split'\n"
@@ -103,22 +108,22 @@ def write_mqc(split_name, n_positives, n_negatives, gs_out, bar_out):
             "#         description: 'Sampled negatives for the split'\n"
             "#         format: '{:,.0f}'\n"
             "#         scale: 'Oranges'\n"
-            "Sample\tn_positives\tn_negatives\n"
-            f"{split_name}\t{n_positives}\t{n_negatives}\n"
+            "Sample\tID\tn_positives\tn_negatives\n"
+            f"{sample}\t{id_}\t{n_positives}\t{n_negatives}\n"
         )
 
     with open(bar_out, "w") as fh:
         fh.write(
             "# id: 'pos_neg_bar'\n"
             "# section_name: 'Positive vs Negative Pairs'\n"
-            "# description: 'Positive and sampled negative pairs per split.'\n"
+            "# description: 'Positive and sampled negative pairs per split, across every dataset.'\n"
             "# plot_type: 'bargraph'\n"
             "# pconfig:\n"
             "#     id: 'pos_neg_bar_plot'\n"
             "#     title: 'Positive vs Negative PPIs per Split'\n"
             "#     ylab: '# Pairs'\n"
             "Sample\tPositives\tNegatives\n"
-            f"{split_name}\t{n_positives}\t{n_negatives}\n"
+            f"{sample}\t{n_positives}\t{n_negatives}\n"
         )
 
 
@@ -131,6 +136,7 @@ def main():
     ap.add_argument("--uniform", action="store_true",
                      help="Draw negative endpoints uniformly at random instead of degree-weighted")
     ap.add_argument("--seed", type=int, default=42)
+    ap.add_argument("--id", required=True, help="Dataset ID, for MultiQC tagging")
     args = ap.parse_args()
 
     rows = read_ppis(args.positives)
@@ -142,6 +148,7 @@ def main():
         args.split_name, len(rows), len(negs),
         gs_out=f"{args.split_name}_gs_mqc.tsv",
         bar_out=f"{args.split_name}_bar_mqc.tsv",
+        id_=args.id,
     )
 
 

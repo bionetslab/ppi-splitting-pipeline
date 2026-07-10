@@ -19,7 +19,7 @@ import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from utils import read_fasta, read_ppis, write_fasta, write_ppi_csv
+from utils import mqc_category, read_fasta, read_ppis, write_fasta, write_ppi_csv
 
 
 def fasta_ids(path):
@@ -36,57 +36,41 @@ def filter_ppis(rows, keep):
     return [row for row in rows if row["protein1"] in keep and row["protein2"] in keep]
 
 
-def write_mqc(split_results):
-    with open("remove_redundant_gs_mqc.tsv", "w") as fh:
-        fh.write(
-            "# id: 'nr_generalstats'\n"
-            "# plot_type: 'generalstats'\n"
-            "# pconfig:\n"
-            "#     - n_ppis_pos:\n"
-            "#         title: 'PPIs (pos)'\n"
-            "#         description: 'Positive PPIs in the split after redundancy removal'\n"
-            "#         format: '{:,.0f}'\n"
-            "#         scale: 'Blues'\n"
-            "#     - n_proteins:\n"
-            "#         title: 'Proteins'\n"
-            "#         description: 'Unique proteins in the split after redundancy removal'\n"
-            "#         format: '{:,.0f}'\n"
-            "#         scale: 'Greens'\n"
-            "#     - n_ppis_removed:\n"
-            "#         title: 'PPIs removed'\n"
-            "#         description: 'PPIs removed because a partner protein was similar to a training protein'\n"
-            "#         format: '{:,.0f}'\n"
-            "#         scale: 'Reds'\n"
-            "#     - n_proteins_removed:\n"
-            "#         title: 'Proteins removed'\n"
-            "#         description: 'Proteins removed due to sequence similarity with the training set (CD-HIT-2D)'\n"
-            "#         format: '{:,.0f}'\n"
-            "#         scale: 'Oranges'\n"
-            "Sample\tn_ppis_pos\tn_proteins\tn_ppis_removed\tn_proteins_removed\n"
-        )
-        for r in split_results:
-            fh.write(f"{r['name']}\t{r['n_ppis_nr']}\t{r['n_proteins_nr']}\t{r['n_ppis_removed']}\t{r['n_proteins_removed']}\n")
+def write_mqc(split_results, id_, n_ppis_discarded):
+    """The sole contributor to the per-dataset "split_bar_{id_}" PPI
+    Partitioning bar chart for kahip/ilp datasets (sort_ppis.py/solve_ilp.py
+    contribute nothing themselves -- see their modules): train/val/test show
+    their final (post-CD-HIT) Kept size, and the single "discarded" bar is
+    stacked by discard reason -- cross-partition (KaHIP/ILP, computed here
+    from the original pre-split ppis.csv) vs CD-HIT-2D redundancy removal
+    (summed across val+test)."""
+    total_cdhit_removed = sum(r["n_ppis_removed"] for r in split_results)
 
     with open("remove_redundant_bar_mqc.tsv", "w") as fh:
         fh.write(
-            "# id: 'similarity_bar'\n"
-            "# section_name: 'Sequence Similarity Filtering'\n"
-            "# description: 'Val and test proteins removed because they share ≥40% sequence identity with a training protein (CD-HIT-2D). Training proteins are never removed.'\n"
+            f"# id: 'split_bar_{id_}'\n"
+            f"# section_name: 'PPI Partitioning: {id_}'\n"
+            "# description: 'PPI counts per split. The discarded bar is coloured by why "
+            "a PPI never made it into a split: cross-partition (KaHIP/ILP) or removed by "
+            "CD-HIT-2D redundancy filtering.'\n"
             "# plot_type: 'bargraph'\n"
             "# pconfig:\n"
-            "#     id: 'similarity_bar_plot'\n"
-            "#     title: 'Similarity to Training Set: val and test proteins'\n"
-            "#     ylab: '# Proteins'\n"
-            "Sample\tKept (dissimilar to train)\tRemoved (similar to train)\n"
+            f"#     id: 'split_bar_plot_{id_}'\n"
+            f"#     title: 'PPI Partitioning: edges per split ({id_})'\n"
+            "#     ylab: '# PPIs'\n"
+            "Sample\tKept\tDiscarded (KaHIP/ILP)\tDiscarded (CD-HIT-2D)\n"
         )
         for r in split_results:
-            if r["name"] != "train":
-                fh.write(f"{r['name']}\t{r['n_proteins_nr']}\t{r['n_proteins_removed']}\n")
+            fh.write(f"{mqc_category(r['name'])}\t{r['n_ppis_nr']}\t0\t0\n")
+        fh.write(f"{mqc_category('discarded')}\t0\t{n_ppis_discarded}\t{total_cdhit_removed}\n")
 
 
 
 def main():
     ap = argparse.ArgumentParser()
+    ap.add_argument("--ppis", required=True,
+                    help="Original, pre-split PPI CSV -- used only to compute how many "
+                         "PPIs were discarded by KaHIP/ILP for the PPI Partitioning chart")
     ap.add_argument("--train_ppis", required=True)
     ap.add_argument("--val_ppis", required=True)
     ap.add_argument("--test_ppis", required=True)
@@ -95,7 +79,10 @@ def main():
     ap.add_argument("--test_fasta", required=True)
     ap.add_argument("--sim_train_val", required=True)
     ap.add_argument("--sim_train_test", required=True)
+    ap.add_argument("--id", required=True, help="Dataset ID, for MultiQC tagging")
     args = ap.parse_args()
+
+    n_input = len(read_ppis(args.ppis))
 
     train_seqs = read_fasta(args.train_fasta)
     val_seqs   = read_fasta(args.val_fasta)
@@ -131,29 +118,30 @@ def main():
     ]:
         print(f"{name}: {len(ppis)} PPIs, {len(prot)} proteins", file=sys.stderr)
 
+    # kahip/ilp assign every PPI to exactly one split (or discard it), so the
+    # pre-CD-HIT train/val/test files this script received already contain
+    # every non-discarded PPI -- comparing their total against the original
+    # input gives the KaHIP/ILP discard count without needing that number
+    # threaded in from SORT_PPIS/SOLVE_ILP.
+    n_ppis_discarded = n_input - (len(train_ppis) + len(val_ppis) + len(test_ppis))
+
     write_mqc([
         {
             "name": "train",
             "n_ppis_nr": len(train_ppis_nr),
-            "n_proteins_nr": len(train_prot_nr),
             "n_ppis_removed": 0,
-            "n_proteins_removed": 0,
         },
         {
             "name": "val",
             "n_ppis_nr": len(val_ppis_nr),
-            "n_proteins_nr": len(val_prot_nr),
             "n_ppis_removed": len(val_ppis) - len(val_ppis_nr),
-            "n_proteins_removed": len(val_seqs) - len(val_prot_nr),
         },
         {
             "name": "test",
             "n_ppis_nr": len(test_ppis_nr),
-            "n_proteins_nr": len(test_prot_nr),
             "n_ppis_removed": len(test_ppis) - len(test_ppis_nr),
-            "n_proteins_removed": len(test_seqs) - len(test_prot_nr),
         },
-    ])
+    ], args.id, n_ppis_discarded)
 
 
 if __name__ == "__main__":

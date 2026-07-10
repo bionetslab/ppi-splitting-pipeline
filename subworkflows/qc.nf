@@ -12,8 +12,8 @@ def flattenMqc(ch) {
 }
 
 // Runs the per-attribute bias analyses, collects them into a scatter plot,
-// builds the train/val/test similarity heatmap, and assembles one MultiQC
-// report per dataset from every stage's diagnostics.
+// builds the train/val/test similarity heatmap, and assembles one combined
+// MultiQC report for the whole run from every dataset's diagnostics.
 workflow QC {
     take:
     train_ppis            // tuple(meta, path)
@@ -69,14 +69,17 @@ workflow QC {
         .map { meta, t, v, te, b -> tuple(meta.id, t, v, te, b) }
     heatmap = SIMILARITY_HEATMAP(heatmap_inputs)
 
+    // Bias tables are deliberately excluded here -- they don't add value
+    // over the bias_scatter plot above, which is what's kept. bias.mqc
+    // still feeds COLLECT_BIAS unconditionally, just not this final mix.
     mqc_files = flattenMqc(sorted_mqc)
         .mix(flattenMqc(nr_mqc))
         .mix(flattenMqc(neg_mqc))
         .mix(flattenMqc(clf_mqc))
-        .mix(flattenMqc(bias.mqc))
         .mix(scatter.mqc)
         .mix(heatmap)
-        .groupTuple()
+        .map { id, f -> f }
+        .collect()
 
     MULTIQC(mqc_files)
 }

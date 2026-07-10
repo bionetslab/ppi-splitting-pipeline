@@ -110,3 +110,28 @@ def load_embeddings(path):
     """Return {protein_id: embedding_array} from an NPZ file."""
     raw = np.load(path, allow_pickle=False)
     return {k: raw[k] for k in raw.files}
+
+
+# ---------------------------------------------------------------------------
+# MultiQC sample naming
+# ---------------------------------------------------------------------------
+
+# MultiQC's rendered tables/bar charts sort rows alphabetically by Sample
+# name regardless of the underlying file/row order, so a plain f"{id}_{split}"
+# Sample would show up as test_balanced, test_realistic, train, val. This
+# numeric prefix forces the requested train/val/test/test_balanced/test_realistic
+# order while keeping each dataset's rows grouped together (the id_ prefix
+# still sorts first).
+SPLIT_SORT_KEY = {"train": 1, "val": 2, "test": 3, "test_balanced": 4,
+                  "test_realistic": 5, "discarded": 6}
+
+
+def mqc_sample(id_, split):
+    """Build a MultiQC Sample name for one dataset+split that sorts correctly."""
+    return f"{id_}_{SPLIT_SORT_KEY.get(split, 9)}_{split}"
+
+
+def mqc_category(name):
+    """Same sort-key prefix as mqc_sample, for bar-chart categories that are
+    already scoped to one dataset's own chart (no id_ qualification needed)."""
+    return f"{SPLIT_SORT_KEY.get(name, 9)}_{name}"

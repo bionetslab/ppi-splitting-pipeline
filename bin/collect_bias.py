@@ -46,6 +46,7 @@ def parse_tsv(path):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("tsvs", nargs="+", help="*_bias_mqc.tsv files from bias_analysis.py")
+    ap.add_argument("--id", required=True, help="Dataset ID, for MultiQC tagging")
     args = ap.parse_args()
 
     # Parse all files; derive attribute name from filename
@@ -118,8 +119,8 @@ def main():
     with open("bias_scatter_mqc.html", "w") as fh:
         fh.write(
             "<!--\n"
-            "id: 'bias_scatter'\n"
-            "section_name: 'Bias Analysis – Utility vs. Detectability'\n"
+            f"id: 'bias_scatter_{args.id}'\n"
+            f"section_name: 'Bias Analysis – Utility vs. Detectability: {args.id}'\n"
             "description: 'Colour = attribute (click/double-click to filter), "
             "shape = split. x = detectability (Ridge Spearman ρ), y = utility NMI(A;Y) = MI/sqrt(H(A)·H(Y)).'\n"
             "-->\n"

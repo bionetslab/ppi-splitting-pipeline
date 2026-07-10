@@ -36,7 +36,7 @@ process COLLECT_BIAS {
 
     script:
     """
-    collect_bias.py ${tsvs}
+    collect_bias.py ${tsvs} --id ${id}
     """
 }
 
@@ -58,16 +58,23 @@ process SIMILARITY_HEATMAP {
         --test_fasta  ${test_fasta} \\
         --blast       ${blast_tsv} \\
         --max_per_split ${params.heatmap_max_per_split} \\
-        --seed        ${params.seed}
+        --seed        ${params.seed} \\
+        --id          ${id}
     """
 }
 
+// One combined report for the whole run. stageAs: "?/*" stages every
+// dataset's contributions into its own numbered subdirectory, since
+// different datasets independently write same-named files (e.g. every
+// dataset has its own classifier_metrics_mqc.tsv) that would otherwise
+// collide in one task's work directory -- MultiQC scans subdirectories
+// recursively, so this is transparent to it.
 process MULTIQC {
-    publishDir(path: { "${params.outdir}/${id}/multiqc" }, mode: 'copy')
-    tag "${id}"
+    publishDir(path: { "${params.outdir}/multiqc" }, mode: 'copy')
+    tag "multiqc"
 
     input:
-    tuple val(id), path(mqc_files)
+    path multiqc_files, stageAs: "?/*"
 
     output:
     path "multiqc_report.html"
@@ -75,6 +82,6 @@ process MULTIQC {
 
     script:
     """
-    multiqc . --title "PPI Splitting Pipeline: ${id}" --filename multiqc_report.html
+    multiqc . --title "PPI Splitting Pipeline" --filename multiqc_report.html
     """
 }

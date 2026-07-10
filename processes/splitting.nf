@@ -11,7 +11,7 @@ process SORT_PPIS {
     tuple val(meta), path("train.fasta"), emit: train_fasta
     tuple val(meta), path("val.fasta"),   emit: val_fasta
     tuple val(meta), path("test.fasta"),  emit: test_fasta
-    tuple val(meta), path("*_mqc.tsv"),   emit: mqc
+    tuple val(meta), path("*_mqc.tsv"),   emit: mqc, optional: true
 
     script:
     """
@@ -53,7 +53,8 @@ process SPLIT_RANDOM {
         --train-split ${meta.train_split} \\
         --val-split   ${meta.val_split} \\
         --test-split  ${meta.test_split} \\
-        --seed        ${params.seed}
+        --seed        ${params.seed} \\
+        --id          ${meta.id}
     """
 }
 
@@ -93,7 +94,7 @@ process SOLVE_ILP {
     tuple val(meta), path("train.fasta"), emit: train_fasta
     tuple val(meta), path("val.fasta"),   emit: val_fasta
     tuple val(meta), path("test.fasta"),  emit: test_fasta
-    tuple val(meta), path("*_mqc.tsv"),   emit: mqc
+    tuple val(meta), path("*_mqc.tsv"),   emit: mqc, optional: true
 
     script:
     def license_export = gurobi_license ? "export GRB_LICENSE_FILE=\$PWD/${gurobi_license}" : ""
@@ -118,6 +119,7 @@ process REMOVE_REDUNDANT {
 
     input:
     tuple val(meta),
+          path(orig_ppis),
           path(train_ppis), path(val_ppis), path(test_ppis),
           path(train_fasta), path(val_fasta), path(test_fasta),
           path(sim_train_val,  stageAs: 'sim_train_val.out'),
@@ -135,6 +137,7 @@ process REMOVE_REDUNDANT {
     script:
     """
     remove_redundant.py \\
+        --ppis           ${orig_ppis} \\
         --train_ppis     ${train_ppis} \\
         --val_ppis       ${val_ppis} \\
         --test_ppis      ${test_ppis} \\
@@ -142,6 +145,7 @@ process REMOVE_REDUNDANT {
         --val_fasta      ${val_fasta} \\
         --test_fasta     ${test_fasta} \\
         --sim_train_val  ${sim_train_val} \\
-        --sim_train_test ${sim_train_test}
+        --sim_train_test ${sim_train_test} \\
+        --id             ${meta.id}
     """
 }

@@ -67,29 +67,36 @@ def compute_metrics(y_true, y_prob):
     }
 
 
-def write_mqc(results):
-    with open("classifier_metrics_mqc.tsv", "w") as fh:
-        fh.write(
-            "# id: 'classifier_metrics'\n"
-            "# section_name: 'Classifier Performance'\n"
-            "# description: 'RandomForest PPI classifier. Hyperparameters tuned on val AUROC (3 configs: max_depth 5/10/30, max_samples 0.2), then retrained on train+val. Balanced test set: 1:1 ratio. Realistic test set: 1:10 ratio, uniform random negatives.'\n"
-            "# plot_type: 'table'\n"
-            "# pconfig:\n"
-            "#     id: 'classifier_metrics_table'\n"
-            "#     title: 'RF Classifier - Test Performance'\n"
-            "# headers:\n"
-            "#     AUROC:      {format: '{:.4f}'}\n"
-            "#     AUPRC:      {format: '{:.4f}'}\n"
-            "#     F1:         {format: '{:.4f}'}\n"
-            "#     MCC:        {format: '{:.4f}'}\n"
-            "#     Precision:  {format: '{:.4f}'}\n"
-            "#     Recall:     {format: '{:.4f}'}\n"
-            "#     Accuracy:   {format: '{:.4f}'}\n"
-            "Sample\tAUROC\tAUPRC\tF1\tMCC\tPrecision\tRecall\tAccuracy\n"
-        )
-        cols = ["auroc", "auprc", "f1", "mcc", "precision", "recall", "accuracy"]
-        for name, metrics in results:
-            fh.write(name + "\t" + "\t".join(f"{metrics[c]:.4f}" for c in cols) + "\n")
+def write_mqc(results, id_):
+    """One table per test split (test_balanced / test_realistic), each
+    merging across datasets -- keeps either table from getting cluttered
+    with the other's rows, matching the split evaluation of the two test
+    sets."""
+    cols = ["auroc", "auprc", "f1", "mcc", "precision", "recall", "accuracy"]
+    for name, metrics in results:
+        table_id = f"classifier_metrics_{name}"
+        with open(f"{table_id}_mqc.tsv", "w") as fh:
+            fh.write(
+                f"# id: '{table_id}'\n"
+                f"# section_name: 'Classifier Performance ({name})'\n"
+                "# description: 'RandomForest PPI classifier. Hyperparameters tuned on val AUROC (3 configs: max_depth 5/10/30, max_samples 0.2), then retrained on train+val.'\n"
+                "# plot_type: 'table'\n"
+                "# pconfig:\n"
+                f"#     id: '{table_id}_table'\n"
+                f"#     title: 'RF Classifier - {name} Test Performance'\n"
+                "# headers:\n"
+                "#     ID:         {description: 'Dataset ID'}\n"
+                "#     AUROC:      {format: '{:.4f}'}\n"
+                "#     AUPRC:      {format: '{:.4f}'}\n"
+                "#     F1:         {format: '{:.4f}'}\n"
+                "#     MCC:        {format: '{:.4f}'}\n"
+                "#     Precision:  {format: '{:.4f}'}\n"
+                "#     Recall:     {format: '{:.4f}'}\n"
+                "#     Accuracy:   {format: '{:.4f}'}\n"
+                "Sample\tID\tAUROC\tAUPRC\tF1\tMCC\tPrecision\tRecall\tAccuracy\n"
+            )
+            row = "\t".join(f"{metrics[c]:.4f}" for c in cols)
+            fh.write(f"{id_}\t{id_}\t{row}\n")
 
 
 def main():
@@ -100,6 +107,7 @@ def main():
     ap.add_argument("--test_realistic", required=True)
     ap.add_argument("--embeddings",     required=True)
     ap.add_argument("--seed",           type=int, default=42)
+    ap.add_argument("--id", required=True, help="Dataset ID, for MultiQC tagging")
     args = ap.parse_args()
 
     print("Loading embeddings ...", file=sys.stderr)
@@ -144,7 +152,7 @@ def main():
             file=sys.stderr,
         )
 
-    write_mqc(results)
+    write_mqc(results, args.id)
 
 
 if __name__ == "__main__":

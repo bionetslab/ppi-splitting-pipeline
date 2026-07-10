@@ -60,7 +60,7 @@ def cluster_order(mat):
     return dendrogram(Z, no_plot=True)["leaves"]
 
 
-def make_html(mat, split_labels, output):
+def make_html(mat, split_labels, output, id_):
     import plotly.graph_objects as go
     from plotly.subplots import make_subplots
 
@@ -150,8 +150,8 @@ def make_html(mat, split_labels, output):
     with open(output, "w") as fh:
         fh.write(
             "<!--\n"
-            "id: 'similarity_heatmap'\n"
-            "section_name: 'Sequence Similarity Heatmap'\n"
+            f"id: 'similarity_heatmap_{id_}'\n"
+            f"section_name: 'Sequence Similarity Heatmap: {id_}'\n"
             "description: 'Clustered bitscore matrix for a sample of proteins, coloured by "
             "train / val / test split. Proteins from the same split should cluster together "
             "with high within-split similarity and reduced cross-split similarity.'\n"
@@ -169,6 +169,7 @@ def main():
     ap.add_argument("--max_per_split",  type=int, default=200)
     ap.add_argument("--seed",           type=int, default=42)
     ap.add_argument("--output",         default="similarity_heatmap_mqc.html")
+    ap.add_argument("--id", required=True, help="Dataset ID, for MultiQC tagging")
     args = ap.parse_args()
 
     rng = np.random.default_rng(args.seed)
@@ -192,7 +193,7 @@ def main():
     labels_clustered = [split_labels[i] for i in order]
 
     print(f"Writing {args.output} …", file=sys.stderr)
-    make_html(mat_clustered, labels_clustered, args.output)
+    make_html(mat_clustered, labels_clustered, args.output, args.id)
     print("Done.", file=sys.stderr)
 
 

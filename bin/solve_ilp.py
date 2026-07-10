@@ -169,44 +169,6 @@ def solve_ilp(clusters_list, intra_ppi, cross_ppi, splits, names, epsilon, max_s
     }
 
 
-def write_mqc(n_input, n_proteins_input, split_results, total_cross):
-    n_ppis_assigned  = sum(r["n_ppis"] for r in split_results)
-    n_ppis_discarded = n_input - n_ppis_assigned
-
-    with open("sort_ppis_gs_mqc.tsv", "w") as fh:
-        fh.write(
-            "# id: 'split_generalstats'\n"
-            "# plot_type: 'generalstats'\n"
-            "# pconfig:\n"
-            "#     - n_ppis_discarded_ilp:\n"
-            "#         title: 'PPIs discarded (ILP)'\n"
-            "#         description: 'Cross-cluster PPIs discarded because their proteins were assigned to different splits'\n"
-            "#         format: '{:,.0f}'\n"
-            "#         scale: 'Greys'\n"
-            "Sample\tn_ppis_discarded_ilp\n"
-        )
-        for r in split_results:
-            fh.write(f"{r['name']}\t{n_ppis_discarded}\n")
-
-    with open("sort_ppis_bar_mqc.tsv", "w") as fh:
-        fh.write(
-            "# id: 'split_bar'\n"
-            "# section_name: 'PPI Partitioning'\n"
-            f"# description: 'Of {n_input:,} input PPIs ({n_proteins_input:,} proteins), "
-            f"{n_ppis_assigned:,} were assigned to a split and {n_ppis_discarded:,} were "
-            f"discarded (cross-cluster PPIs). {total_cross:,} cross-cluster PPI pairs penalised in ILP.'\n"
-            "# plot_type: 'bargraph'\n"
-            "# pconfig:\n"
-            "#     id: 'split_bar_plot'\n"
-            "#     title: 'PPI Partitioning: edges per split'\n"
-            "#     ylab: '# PPIs'\n"
-            "Sample\tPPIs\n"
-        )
-        for r in split_results:
-            fh.write(f"{r['name']}\t{r['n_ppis']}\n")
-        fh.write(f"discarded\t{n_ppis_discarded}\n")
-
-
 def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -290,7 +252,13 @@ def main():
         print(f"  {name}: {len(rows):,} PPIs, {len(proteins):,} proteins", file=sys.stderr)
         split_results.append({"name": name, "n_ppis": len(rows)})
 
-    write_mqc(len(ppi_rows), len(all_proteins), split_results, total_cross)
+    n_ppis_assigned = sum(r["n_ppis"] for r in split_results)
+    print(
+        f"{len(ppi_rows) - n_ppis_assigned} of {len(ppi_rows)} PPIs discarded (cross-cluster, "
+        f"{total_cross} PPIs were penalised in the ILP); PPI Partitioning chart is written by "
+        "REMOVE_REDUNDANT, which runs next.",
+        file=sys.stderr,
+    )
 
 
 if __name__ == "__main__":

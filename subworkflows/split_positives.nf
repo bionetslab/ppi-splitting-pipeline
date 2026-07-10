@@ -56,7 +56,11 @@ workflow SPLIT_POSITIVES {
     sim_tv = cdhit_branched.train_val.map { meta, label, f -> tuple(meta, f) }
     sim_tt = cdhit_branched.train_test.map { meta, label, f -> tuple(meta, f) }
 
-    nr_inputs = homology_train_ppis.join(homology_val_ppis).join(homology_test_ppis)
+    // ppis_ch (the original, pre-split PPI file) is threaded in so
+    // REMOVE_REDUNDANT can compute the KaHIP/ILP discard count itself for
+    // the PPI Partitioning chart, without needing that number passed from
+    // SORT_PPIS/SOLVE_ILP (which no longer emit any mqc content at all).
+    nr_inputs = ppis_ch.join(homology_train_ppis).join(homology_val_ppis).join(homology_test_ppis)
         .join(homology_train_fasta).join(homology_val_fasta).join(homology_test_fasta)
         .join(sim_tv).join(sim_tt)
 

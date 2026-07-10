@@ -33,7 +33,7 @@ process TRAIN_CLASSIFIER {
     tuple val(meta), path(train_csv), path(val_csv), path(test_balanced_csv), path(test_realistic_csv), path(embeddings)
 
     output:
-    tuple val(meta), path("classifier_metrics_mqc.tsv"), emit: mqc
+    tuple val(meta), path("classifier_metrics_*_mqc.tsv"), emit: mqc
 
     script:
     """
@@ -43,6 +43,7 @@ process TRAIN_CLASSIFIER {
         --test_balanced  ${test_balanced_csv} \\
         --test_realistic ${test_realistic_csv} \\
         --embeddings     ${embeddings} \\
-        --seed           ${params.seed}
+        --seed           ${params.seed} \\
+        --id             ${meta.id}
     """
 }
