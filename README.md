@@ -163,17 +163,17 @@ hippie,data/HIPPIE-current.csv,,,
 string,data/string.csv,ilp,ilp,0.5
 ```
 
-| Column                                                                 | Overrides                     | Notes                                                                                |
-|-------------------------------------------------------------------------|--------------------------------|-----------------------------------------------------------------------------------|
-| `id`                                                                   | —                              | Required. Used as the output subfolder name (`results/<id>/...`) and in logs.       |
-| `ppis`                                                                 | —                              | Required. Path to this dataset's PPI CSV.                                           |
-| `sequences`, `go_annotations`, `species`                               | UniProt fetch step             | Supply all three to skip `FETCH_DATA` for this dataset.                             |
-| `blast_results`                                                        | BLAST step                     | Supply to skip `RUN_BLAST` for this dataset (a precomputed `all_vs_all.tsv`).        |
-| `candidate_network`                                                    | —                              | Optional candidate pool CSV for the ILP negative sampler.                            |
-| `embedding_model`, `cdhit_identity`, `cdhit_wordsize`                   | `params.*` of the same name    |                                                                                     |
-| `split_method`, `edge_weight`, `kahip_k`, `ilp_kahip_k`, `ilp_epsilon`  | `params.*` of the same name    |                                                                                     |
-| `train_split`, `val_split`, `test_split`                               | `params.*` of the same name    |                                                                                     |
-| `negative_sampling_method`                                             | `params.*` of the same name    |                                                                                     |
+| Column                                                                 | Overrides                   | Notes                                                                                                                            |
+|------------------------------------------------------------------------|-----------------------------|----------------------------------------------------------------------------------------------------------------------------------|
+| `id`                                                                   | —                           | Required. Used as the output subfolder name (`results/<id>/...`) and in logs.                                                    |
+| `ppis`                                                                 | —                           | Required. Path to this dataset's PPI CSV.                                                                                        |
+| `sequences`, `go_annotations`, `species`                               | UniProt fetch step          | Supply all three to skip `FETCH_DATA` for this dataset.                                                                          |
+| `blast_results`                                                        | BLAST step                  | Supply to skip `RUN_BLAST` for this dataset (a precomputed `all_vs_all.tsv`).                                                    |
+| `candidate_network`                                                    | —                           | Optional candidate pool CSV for the ILP negative sampler.                                                                        |
+| `embedding_model`, `cdhit_identity`, `cdhit_wordsize`                  | `params.*` of the same name | Defaults: `embedding_model`: esm2, `cdhit_identity`: 0.4, `cdhit_wordsize`: 2                                                    |
+| `split_method`, `edge_weight`, `kahip_k`, `ilp_kahip_k`, `ilp_epsilon` | `params.*` of the same name | Defaults: `split_method`: kahip (k=3), `edge_weight`: normalized_bitscore, `kahip_k`: 3, `ilp_kahip_k`: 100, `ilp_epsilon`: 0.05 |
+| `train_split`, `val_split`, `test_split`                               | `params.*` of the same name | Defaults: 0.8, 0.1, 0.1                                                                                                          |
+| `negative_sampling_method`                                             | `params.*` of the same name | Defaults: default (alternative: ilp)                                                                                             |
 
 Everything else (solver settings, Gurobi license, resource limits, seeds, the
 ILP negative sampler's bias-weighting terms, ...) stays a run-wide default in
