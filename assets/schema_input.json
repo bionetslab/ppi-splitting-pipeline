@@ -70,7 +70,7 @@
       },
       "split_method": {
         "type": "string",
-        "enum": ["kahip", "ilp"]
+        "enum": ["kahip", "ilp", "random"]
       },
       "edge_weight": {
         "type": "string",
@@ -108,7 +108,7 @@
       },
       "negative_sampling_method": {
         "type": "string",
-        "enum": ["default", "ilp"]
+        "enum": ["default", "ilp", "uniform"]
       },
       "neg_ilp_alpha_confidence": {
         "type": "number",

@@ -76,7 +76,7 @@ Each dataset gets its own report: open `results/<id>/multiqc/multiqc_report.html
 
 ### Step descriptions
 
-**FETCH_DATA** — Queries UniProt for all proteins in the input CSV. Retrieves sequences (canonical + isoform-specific via the FASTA endpoint), GO annotations (biological process, molecular function, cellular component), and NCBI taxon IDs. Outputs `sequences.fasta`, `go_annotations.tsv`, and `species.tsv`. When several samplesheet datasets need a fetch, they're merged into one combined PPI list first (`COMBINE_PPIS`) and fetched together exactly once, published to `results/_shared/data/`, then split back out per dataset (`SUBSET_FETCHED_DATA`) — see [Multiple datasets (samplesheet)](#multiple-datasets-samplesheet) below.
+**FETCH_DATA** — Queries UniProt for the union of unique proteins across every samplesheet dataset that needs a fetch (extracted directly from each dataset's `protein1`/`protein2` columns and deduplicated, no PPI CSVs concatenated). Retrieves sequences (canonical + isoform-specific via the FASTA endpoint), GO annotations (biological process, molecular function, cellular component), and NCBI taxon IDs. Outputs `sequences.fasta`, `go_annotations.tsv`, and `species.tsv`, published to `results/_shared/data/`, then split back out per dataset (`SUBSET_FETCHED_DATA`) — see [Multiple datasets (samplesheet)](#multiple-datasets-samplesheet) below.
 
 **GET_LENGTHS** — Computes per-protein sequence lengths for length-normalized BLAST scores. Runs once on the shared fetch batch (see above) for datasets needing a fetch, and once per dataset for datasets supplying a precomputed `sequences.fasta`.
 
@@ -93,11 +93,13 @@ Each dataset gets its own report: open `results/<id>/multiqc/multiqc_report.html
 
 **SOLVE_ILP** — Assigns each PPI to a split by solving a mixed-integer linear program (CVXPY) that maximizes the number of retained PPIs while satisfying constraints (each cluster is assigned to 1 split, the train/val/test split follows a pre-defined proportion of 0.8/0.1/0.1). The ILP solver is Gurobi, by default, with the gurobi license file specified via `--gurobi_license`. If no license is available, the open-source solvers SCIP or HiGHS can be used instead.
 
-**CDHIT2D** – Calls CD-HIT 2D between train/val and train/test to identify proteins in val/test that are too similar to any training protein (above the CD-HIT identity threshold). Writes a TSV of redundant proteins for each split.
+**SPLIT_RANDOM** — `split_method=random`: a deliberately naive baseline that shuffles PPIs and slices them into train/val/test by proportion only, ignoring sequence similarity or topology entirely. Doesn't discard any PPIs, and its output skips `CDHIT2D`/`REMOVE_REDUNDANT` entirely — see [Naive baseline: the topology shortcut](#naive-baseline-the-topology-shortcut-optional) below.
 
-**REMOVE_REDUNDANT** — Removes proteins from val and test that are too similar to any training protein using the CD-HIT 2D TSVs.
+**CDHIT2D** – Calls CD-HIT 2D between train/val and train/test to identify proteins in val/test that are too similar to any training protein (above the CD-HIT identity threshold). Writes a TSV of redundant proteins for each split. Only runs for `kahip`/`ilp` splits.
 
-**SAMPLE_NEGATIVES_DEGREE** — Samples random negative pairs for each split. Negatives are drawn such that each protein's degree distribution is approximately preserved. Produces a balanced test set (1:1 positive:negative) and a realistic test set (1:10 ratio). 
+**REMOVE_REDUNDANT** — Removes proteins from val and test that are too similar to any training protein using the CD-HIT 2D TSVs. Only runs for `kahip`/`ilp` splits.
+
+**SAMPLE_NEGATIVES_DEGREE** — Samples random negative pairs for each split. By default, negatives are drawn such that each protein's degree distribution is approximately preserved, producing a balanced test set (1:1 positive:negative) and a realistic test set (1:10 ratio). With `negative_sampling_method=uniform`, endpoints are instead drawn fully uniformly at random for *every* split (not just the realistic test set) — see [Naive baseline: the topology shortcut](#naive-baseline-the-topology-shortcut-optional) below.
 
 **SAMPLE_NEGATIVES_ILP** – An ILP-based alternative satisfying the size constraints and minimizing biases while maximizing confidence in the negatives;  see [Bias-aware ILP negative sampling](#bias-aware-ilp-negative-sampling-optional) below.
 
@@ -127,6 +129,7 @@ Attributes analyzed:
 | `functional_relatedness_BP/MF/CC` | Jaccard similarity of GO term sets (biological process / molecular function / cellular component)                                         |
 | `self_interactions`               | 1 if both proteins are identical, 0 otherwise                                                                                             |
 | `same_species`                    | 1 if both proteins share the same NCBI taxon ID, 0 otherwise (only included if the dataset contains proteins from more than one species)  |
+| `topology_shortcut`               | Each endpoint's training positive-rate (pos / (pos + neg) training degree), using whichever endpoint(s) occurred in training; only included if at least one val/test/test_balanced/test_realistic pair has an endpoint that occurred in training — see [Naive baseline: the topology shortcut](#naive-baseline-the-topology-shortcut-optional) below |
 
 **COLLECT_BIAS** — Aggregates all per-attribute TSVs into a single interactive Plotly scatter plot (NMI vs detectability, colored by attribute, shaped by split).
 
@@ -198,9 +201,9 @@ string,data/string.csv,ilp,ilp,0.5,0.5
 | `blast_results`                                                        | BLAST step                  | Supply to skip `RUN_BLAST` for this dataset (a precomputed `all_vs_all.tsv`).                                                    |
 | `candidate_network`                                                    | —                           | Optional candidate pool CSV for the ILP negative sampler.                                                                        |
 | `embedding_model`, `cdhit_identity`, `cdhit_wordsize`                  | `params.*` of the same name | Defaults: `embedding_model`: esm2, `cdhit_identity`: 0.4, `cdhit_wordsize`: 2                                                    |
-| `split_method`, `edge_weight`, `kahip_k`, `ilp_kahip_k`, `ilp_epsilon` | `params.*` of the same name | Defaults: `split_method`: kahip (k=3), `edge_weight`: normalized_bitscore, `kahip_k`: 3, `ilp_kahip_k`: 100, `ilp_epsilon`: 0.05 |
+| `split_method`, `edge_weight`, `kahip_k`, `ilp_kahip_k`, `ilp_epsilon` | `params.*` of the same name | Defaults: `split_method`: kahip (k=3), `edge_weight`: normalized_bitscore, `kahip_k`: 3, `ilp_kahip_k`: 100, `ilp_epsilon`: 0.05. `split_method=random` is a naive baseline, see below |
 | `train_split`, `val_split`, `test_split`                               | `params.*` of the same name | Defaults: 0.8, 0.1, 0.1                                                                                                          |
-| `negative_sampling_method`                                             | `params.*` of the same name | Defaults: default (alternative: ilp)                                                                                             |
+| `negative_sampling_method`                                             | `params.*` of the same name | Defaults: default (alternatives: ilp, uniform — see below)                                                                        |
 | `neg_ilp_alpha_confidence`, `neg_ilp_alpha_bias`                       | `params.*` of the same name | Only used when `negative_sampling_method` is `ilp`; see [Bias-aware ILP negative sampling](#bias-aware-ilp-negative-sampling-optional) below. Highly dataset-specific, so overridable per row rather than fixed run-wide. |
 | `neg_ilp_lambda_degree`, `neg_ilp_lambda_taxon_pair`, `neg_ilp_lambda_self_loop`, `neg_ilp_lambda_jaccard` | `params.*` of the same name | Same as above.                                                                                                    |
 
@@ -222,6 +225,51 @@ once per dataset:
 Both are purely a compute/storage optimization — a dataset in a mixed run
 with others produces the same `train.csv`/`val.csv`/etc. it would if run
 alone.
+
+---
+
+## Naive baseline: the topology shortcut (optional)
+
+Many PPI-splitting publications randomly split pairs 80/10/10 and sample
+negatives uniformly at random. This inflates reported performance: positive
+degree follows a power law while uniform-random negatives don't, so a
+protein's *training* degree — specifically what fraction of its training
+interactions are positive, `pos_degree_in_training(p) /
+(pos_degree_in_training(p) + neg_degree_in_training(p))` — becomes
+predictive of the label by itself, especially for proteins at the extremes
+of the degree distribution. A model can exploit this "topology shortcut"
+instead of learning any real interaction signal, because a naive random
+split lets the same protein land in both training and test.
+
+Reproduce this deliberately-bad setup with:
+
+```bash
+nextflow run main.nf --split_method random --negative_sampling_method uniform
+```
+
+(or per-dataset via the samplesheet's `split_method`/`negative_sampling_method`
+columns, see [Multiple datasets](#multiple-datasets-samplesheet) above).
+`split_method=random` (`SPLIT_RANDOM`) shuffles PPIs and slices them by
+proportion only — no homology- or topology-aware partitioning — and,
+critically, **skips `CDHIT2D`/`REMOVE_REDUNDANT` entirely**: since those
+steps treat a protein shared between train and test as trivially
+~100%-self-similar and strip it back out of test, running them here would
+erase almost all of the train/test protein overlap this baseline exists to
+demonstrate. `negative_sampling_method=uniform` draws negatives fully
+uniformly at random for every split (not just the realistic test set),
+matching how the "many publications" this baseline is modeled on sample
+negatives.
+
+The `topology_shortcut` bias attribute (see the Attributes table above)
+quantifies exactly this effect: it's only computed for pairs where at least
+one endpoint occurred in training, and the whole attribute is skipped (no
+MultiQC output at all) when *no* val/test/test_balanced/test_realistic pair
+qualifies — which is the normal, expected case for the real `kahip`/`ilp`
+splits, since those keep train/val/test protein sets disjoint by design.
+Run a `random`-split dataset alongside a `kahip`/`ilp`-split dataset on the
+same PPI data in one samplesheet to see the difference directly: the naive
+baseline's report will show a `topology_shortcut` table with elevated
+NMI/detectability that the leakage-aware splits' reports won't show at all.
 
 ---
 

@@ -23,6 +23,40 @@ process SORT_PPIS {
     """
 }
 
+// Deliberately naive baseline: shuffles PPIs randomly instead of using a
+// KaHIP partition, so the same protein can (and typically does) land in
+// more than one split -- see bin/sort_ppis_random.py and
+// bin/bias_analysis.py's "topology_shortcut" attribute. No redundancy
+// removal runs downstream of this in SPLIT_POSITIVES: CD-HIT would treat a
+// protein shared between train and test as trivially self-similar and
+// strip it back out, defeating the point of this baseline.
+process SPLIT_RANDOM {
+    tag "${meta.id}"
+
+    input:
+    tuple val(meta), path(ppis), path(fasta)
+
+    output:
+    tuple val(meta), path("train.csv"),   emit: train_ppis
+    tuple val(meta), path("val.csv"),     emit: val_ppis
+    tuple val(meta), path("test.csv"),    emit: test_ppis
+    tuple val(meta), path("train.fasta"), emit: train_fasta
+    tuple val(meta), path("val.fasta"),   emit: val_fasta
+    tuple val(meta), path("test.fasta"),  emit: test_fasta
+    tuple val(meta), path("*_mqc.tsv"),   emit: mqc
+
+    script:
+    """
+    sort_ppis_random.py \\
+        --ppis        ${ppis} \\
+        --fasta       ${fasta} \\
+        --train-split ${meta.train_split} \\
+        --val-split   ${meta.val_split} \\
+        --test-split  ${meta.test_split} \\
+        --seed        ${params.seed}
+    """
+}
+
 process CDHIT2D {
     tag "${meta.id}_${label}"
 

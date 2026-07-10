@@ -2,9 +2,9 @@
 // which would otherwise collide with this subworkflow's own name.
 include { SAMPLE_NEGATIVES_DEGREE; SAMPLE_NEGATIVES_ILP } from '../processes/negative_sampling'
 
-// Samples negative PPIs for each split, using either the default random
-// sampler or the bias-aware ILP sampler, selected per-dataset via
-// meta.negative_sampling_method.
+// Samples negative PPIs for each split, using the degree-preserving
+// sampler, a fully-uniform variant, or the bias-aware ILP sampler --
+// selected per-dataset via meta.negative_sampling_method.
 workflow SAMPLE_NEGATIVES {
     take:
     train_ppis            // tuple(meta, path)
@@ -24,6 +24,13 @@ workflow SAMPLE_NEGATIVES {
 
     branched = splits_ch.branch { meta, label, f, ratio ->
         ilp:     meta.negative_sampling_method == "ilp"
+        // Deliberately naive baseline: uniform-at-random negatives for
+        // every split (not just test_realistic), paired with
+        // split_method=random -- see processes/splitting.nf's
+        // SPLIT_RANDOM and bin/bias_analysis.py's topology_shortcut
+        // attribute for why this combination showcases the degree
+        // shortcut instead of avoiding it.
+        uniform: meta.negative_sampling_method == "uniform"
         default: true
     }
 
@@ -40,13 +47,14 @@ workflow SAMPLE_NEGATIVES {
         .combine(candidate_network_ch, by: 0)
     ilp_out = SAMPLE_NEGATIVES_ILP(ilp_inputs, neg_gurobi_license_ch)
 
+    uniform_inputs = branched.uniform.map { meta, label, f, ratio -> tuple(meta, label, f, ratio, true) }
     default_inputs = branched.default.map { meta, label, f, ratio ->
         tuple(meta, label, f, ratio, label == "test_realistic")
     }
-    default_out = SAMPLE_NEGATIVES_DEGREE(default_inputs)
+    degree_out = SAMPLE_NEGATIVES_DEGREE(uniform_inputs.mix(default_inputs))
 
-    neg_labelled = ilp_out.labelled.mix(default_out.labelled)
-    neg_mqc      = ilp_out.mqc.mix(default_out.mqc)
+    neg_labelled = ilp_out.labelled.mix(degree_out.labelled)
+    neg_mqc      = ilp_out.mqc.mix(degree_out.mqc)
 
     neg_branched = neg_labelled.branch {
         meta, label, f ->

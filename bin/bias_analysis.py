@@ -133,6 +133,45 @@ def same_species_indicator(pairs, species_map):
     return np.array(A, dtype=np.float32)
 
 
+def build_train_degree_ratio(train_pairs, train_labels):
+    """Return {protein_id: pos_degree / (pos_degree + neg_degree)} from the
+    training split's own labelled pairs. A protein absent from training has
+    no entry (undefined, not zero)."""
+    pos = defaultdict(int)
+    neg = defaultdict(int)
+    for (p1, p2), y in zip(train_pairs, train_labels):
+        bucket = pos if y == 1 else neg
+        bucket[p1] += 1
+        bucket[p2] += 1
+    ratio = {}
+    for p in set(pos) | set(neg):
+        total = pos[p] + neg[p]
+        if total > 0:
+            ratio[p] = pos[p] / total
+    return ratio
+
+
+def topology_shortcut(pairs, train_degree_ratio):
+    """Per pair, how exploitable the "topology shortcut" is: each endpoint's
+    training positive-rate pos_degree_in_training(p)/pos_plus_neg_degree_in_training(p),
+    using whichever endpoint(s) occurred in training (averaged if both did).
+    NaN if neither endpoint occurred in training -- the caller drops those
+    pairs, since the shortcut can't apply to a wholly-unseen pair."""
+    A = []
+    for p1, p2 in pairs:
+        r1 = train_degree_ratio.get(p1)
+        r2 = train_degree_ratio.get(p2)
+        if r1 is None and r2 is None:
+            A.append(np.nan)
+        elif r1 is None:
+            A.append(r2)
+        elif r2 is None:
+            A.append(r1)
+        else:
+            A.append((r1 + r2) / 2.0)
+    return np.array(A, dtype=np.float32)
+
+
 def _prepare_split(pairs, y, embeddings):
     """Return (X, filtered_pairs, filtered_y) keeping only pairs with embeddings."""
     X, mask = build_pair_X(pairs, embeddings)
@@ -195,13 +234,14 @@ def analyse(A, X, y, name, seed=42, n_bins=10):
 
 
 ATTRIBUTES = {
-    "sequence_similarity":       lambda pairs, blast_sim, emb, go, sp: seq_sim_within_pair(pairs, blast_sim),
-    "embedding_similarity":      lambda pairs, blast_sim, emb, go, sp: emb_sim_within_pair(pairs, emb),
-    "functional_relatedness_BP": lambda pairs, blast_sim, emb, go, sp: func_relatedness(pairs, go, "BP"),
-    "functional_relatedness_MF": lambda pairs, blast_sim, emb, go, sp: func_relatedness(pairs, go, "MF"),
-    "functional_relatedness_CC": lambda pairs, blast_sim, emb, go, sp: func_relatedness(pairs, go, "CC"),
-    "self_interactions":         lambda pairs, blast_sim, emb, go, sp: self_interactions(pairs),
-    "same_species":              lambda pairs, blast_sim, emb, go, sp: same_species_indicator(pairs, sp),
+    "sequence_similarity":       lambda pairs, blast_sim, emb, go, sp, train_deg: seq_sim_within_pair(pairs, blast_sim),
+    "embedding_similarity":      lambda pairs, blast_sim, emb, go, sp, train_deg: emb_sim_within_pair(pairs, emb),
+    "functional_relatedness_BP": lambda pairs, blast_sim, emb, go, sp, train_deg: func_relatedness(pairs, go, "BP"),
+    "functional_relatedness_MF": lambda pairs, blast_sim, emb, go, sp, train_deg: func_relatedness(pairs, go, "MF"),
+    "functional_relatedness_CC": lambda pairs, blast_sim, emb, go, sp, train_deg: func_relatedness(pairs, go, "CC"),
+    "self_interactions":         lambda pairs, blast_sim, emb, go, sp, train_deg: self_interactions(pairs),
+    "same_species":              lambda pairs, blast_sim, emb, go, sp, train_deg: same_species_indicator(pairs, sp),
+    "topology_shortcut":         lambda pairs, blast_sim, emb, go, sp, train_deg: topology_shortcut(pairs, train_deg),
 }
 
 
@@ -265,6 +305,11 @@ def main():
             sys.exit("--species is required for the same_species attribute")
         species = load_species(args.species)
 
+    train_degree_ratio = None
+    if args.attribute == "topology_shortcut":
+        train_pairs, train_y = read_labelled_csv(args.train)
+        train_degree_ratio = build_train_degree_ratio(train_pairs, train_y)
+
     split_paths = [
         ("train",          args.train),
         ("val",            args.val),
@@ -273,16 +318,37 @@ def main():
     ]
 
     results = []
+    any_nontrain_qualified = False
     for split, path in split_paths:
         pairs, y = read_labelled_csv(path)
         X, pairs_f, y_f = _prepare_split(pairs, y, embeddings)
+        A = compute(pairs_f, blast_sim, embeddings, go_anns, species, train_degree_ratio)
+
+        if args.attribute == "topology_shortcut":
+            # Only pairs with at least one endpoint seen during training are
+            # meaningful here; this is a no-op for every other attribute.
+            valid = ~np.isnan(A)
+            A, X, y_f = A[valid], X[valid], y_f[valid]
+            if split != "train" and X.shape[0] > 0:
+                any_nontrain_qualified = True
+            if X.shape[0] == 0:
+                print(f"  {split}: 0 pairs qualify for topology_shortcut (no training overlap)", file=sys.stderr)
+                continue
+
         print(f"  {X.shape[0]} {split} pairs retained", file=sys.stderr)
-        A = compute(pairs_f, blast_sim, embeddings, go_anns, species)
         r = analyse(A, X, y_f, args.attribute, seed=args.seed)
         results.append((split, r))
         print(f"  [{split}] NMI={r['nmi']:.4f}  ρ={r['detectability']:.4f}", file=sys.stderr)
 
-    write_mqc(args.attribute, results)
+    if args.attribute == "topology_shortcut" and not any_nontrain_qualified:
+        print(
+            "  topology_shortcut not applicable: no val/test_balanced/test_realistic "
+            "protein occurs in the training set (expected for leakage-aware splits) "
+            "-- skipping output.",
+            file=sys.stderr,
+        )
+    elif results:
+        write_mqc(args.attribute, results)
 
 
 if __name__ == "__main__":

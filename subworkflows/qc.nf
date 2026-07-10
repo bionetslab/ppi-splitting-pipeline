@@ -42,7 +42,8 @@ workflow QC {
         def taxa = sp.splitCsv(header: true, sep: '\t').collect { it.taxon_id }.unique()
         def attrs = ["sequence_similarity", "embedding_similarity",
                      "functional_relatedness_BP", "functional_relatedness_MF",
-                     "functional_relatedness_CC", "self_interactions"]
+                     "functional_relatedness_CC", "self_interactions",
+                     "topology_shortcut"]
         if (taxa.size() > 1) attrs << "same_species"
         tuple(meta, attrs)
     }.flatMap { meta, attrs -> attrs.collect { a -> tuple(meta, a) } }
