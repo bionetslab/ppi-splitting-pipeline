@@ -13,7 +13,7 @@ conda activate ppi-splitting-pipeline
 
 ### 2. Prepare your input
 
-Create a CSV file with at least two columns (`protein1`, `protein2`) containing UniProt accession IDs. Additional columns (e.g. STRING evidence scores) are preserved throughout the pipeline.
+Each PPI dataset is a CSV file with at least two columns (`protein1`, `protein2`) containing UniProt accession IDs. Additional columns (e.g. STRING evidence scores) are preserved throughout the pipeline.
 
 ```
 protein1,protein2
@@ -23,16 +23,23 @@ O14836-2,P12345
 ...
 ```
 
+Then list your dataset(s) in a samplesheet CSV, one row per dataset — see [Multiple datasets (samplesheet)](#multiple-datasets-samplesheet) below for the full column reference.
+
+```
+id,ppis
+my_dataset,ppis.csv
+```
+
 ### 3. Run the pipeline
 
 ```bash
-nextflow run main.nf --ppis ppis.csv --outdir results
+nextflow run main.nf --samplesheet samplesheet.csv --outdir results
 ```
 
 If you have a GPU, additionally specify `-profile gpu`, which will submit only the embedding steps to the GPU:
 
 ```bash
-nextflow run main.nf --ppis ppis.csv --outdir results -profile gpu -c my_config.config
+nextflow run main.nf --samplesheet samplesheet.csv --outdir results -profile gpu -c my_config.config
 ```
 
 Config example for an HPC with slurm and a dedicated GPU queue: https://nf-co.re/configs/daisybio/. Important part:
@@ -57,7 +64,7 @@ Config example for an HPC with slurm and a dedicated GPU queue: https://nf-co.re
 
 ### 4. View the report
 
-Open `results/multiqc/multiqc_report.html` in a browser.
+Each dataset gets its own report: open `results/<id>/multiqc/multiqc_report.html` in a browser.
 
 ---
 
@@ -125,17 +132,52 @@ Attributes analyzed:
 
 ## Outputs
 
+Every dataset from the samplesheet gets its own subtree under `--outdir`, named by its `id` column:
+
 ```
 results/
-├── multiqc/
-│   └── multiqc_report.html       # Main report
-├── data/
-│   └── embeddings.npz            # Pre-computed embeddings (reusable)
-├── train.csv                     # Final labelled splits (positives + negatives)
-├── val.csv
-├── test_balanced.csv
-└── test_realistic.csv
+└── <id>/
+    ├── multiqc/
+    │   └── multiqc_report.html       # Main report for this dataset
+    ├── data/
+    │   └── embeddings.npz            # Pre-computed embeddings (reusable)
+    ├── train.csv                     # Final labelled splits (positives + negatives)
+    ├── val.csv
+    ├── test_balanced.csv
+    └── test_realistic.csv
 ```
+
+---
+
+## Multiple datasets (samplesheet)
+
+`--samplesheet` takes a CSV with one row per PPI dataset. Only `id` and `ppis`
+are required — every other column may be left blank, in which case that
+dataset falls back to the corresponding `nextflow.config` default. This makes
+it possible to process several datasets with different parameters in a single
+`nextflow run` invocation, all running in parallel:
+
+```
+id,ppis,split_method,negative_sampling_method,cdhit_identity
+hippie,data/HIPPIE-current.csv,,,
+string,data/string.csv,ilp,ilp,0.5
+```
+
+| Column                                                                 | Overrides                     | Notes                                                                                |
+|-------------------------------------------------------------------------|--------------------------------|-----------------------------------------------------------------------------------|
+| `id`                                                                   | —                              | Required. Used as the output subfolder name (`results/<id>/...`) and in logs.       |
+| `ppis`                                                                 | —                              | Required. Path to this dataset's PPI CSV.                                           |
+| `sequences`, `go_annotations`, `species`                               | UniProt fetch step             | Supply all three to skip `FETCH_DATA` for this dataset.                             |
+| `blast_results`                                                        | BLAST step                     | Supply to skip `RUN_BLAST` for this dataset (a precomputed `all_vs_all.tsv`).        |
+| `candidate_network`                                                    | —                              | Optional candidate pool CSV for the ILP negative sampler.                            |
+| `embedding_model`, `cdhit_identity`, `cdhit_wordsize`                   | `params.*` of the same name    |                                                                                     |
+| `split_method`, `edge_weight`, `kahip_k`, `ilp_kahip_k`, `ilp_epsilon`  | `params.*` of the same name    |                                                                                     |
+| `train_split`, `val_split`, `test_split`                               | `params.*` of the same name    |                                                                                     |
+| `negative_sampling_method`                                             | `params.*` of the same name    |                                                                                     |
+
+Everything else (solver settings, Gurobi license, resource limits, seeds, the
+ILP negative sampler's bias-weighting terms, ...) stays a run-wide default in
+`nextflow.config` and is shared by every dataset in the samplesheet.
 
 ---
 
@@ -173,7 +215,7 @@ nextflow run main.nf --negative_sampling_method ilp
 | `neg_ilp_solver`                                  | `auto`        | `auto`, `gurobi`, `scip`, or `highs`. `auto` tries Gurobi first, then falls back to an open-source solver.                                                                   |
 | `neg_ilp_time_limit`                              | `3600`        | Solver time limit in seconds                                                                                                                                                 |
 | `neg_ilp_mip_gap`                                 | `0.01`        | Solver MIP gap tolerance                                                                                                                                                     |
-| `gurobi_license`                                  | `gurobi.lic`  | Path to a Gurobi license file, only used if the `gurobi` solver is selected                                                                                                  |
+| `gurobi_license`                                  | `null`        | Path to a Gurobi license file, only used if the `gurobi` solver is selected                                                                                                  |
 
 The active `--neg_ilp_lambda_*` weights (for the chosen `degree_bias_mode`) must
 sum to 1; a mismatch is auto-rescaled with a warning unless the script is run
@@ -201,9 +243,9 @@ To investigate which STRING evidence channels explain classifier performance dif
 
 ```bash
 python bin/analyse_string_channels.py \
-    --train      results/train.csv \
-    --test       results/test_balanced.csv \
-    --embeddings results/data/embeddings.npz \
+    --train      results/<id>/train.csv \
+    --test       results/<id>/test_balanced.csv \
+    --embeddings results/<id>/data/embeddings.npz \
     --out        string_channel_analysis.tsv
 ```
 

@@ -1,5 +1,16 @@
 include { BIAS_ANALYSIS; COLLECT_BIAS; SIMILARITY_HEATMAP; MULTIQC } from '../modules/qc'
 
+// Some mqc-emitting processes emit a glob (e.g. "*_mqc.tsv") that can match
+// more than one file per task, which Nextflow packs into a List for that
+// tuple slot -- flatten those out to one (id, file) pair per file so
+// groupTuple() below doesn't end up nesting a List inside the grouped list.
+def flattenMqc(ch) {
+    ch.flatMap { meta, f ->
+        def files = (f instanceof List) ? f : [f]
+        files.collect { ff -> tuple(meta.id, ff) }
+    }
+}
+
 // Runs the per-attribute bias analyses, collects them into a scatter plot,
 // builds the train/val/test similarity heatmap, and assembles one MultiQC
 // report per dataset from every stage's diagnostics.
@@ -51,17 +62,17 @@ workflow QC {
 
     bias = BIAS_ANALYSIS(bias_inputs)
 
-    scatter = COLLECT_BIAS(bias.mqc.map { meta, f -> tuple(meta.id, f) }.groupTuple())
+    scatter = COLLECT_BIAS(flattenMqc(bias.mqc).groupTuple())
 
     heatmap_inputs = train_fasta.join(val_fasta).join(test_fasta).join(blast_out)
         .map { meta, t, v, te, b -> tuple(meta.id, t, v, te, b) }
     heatmap = SIMILARITY_HEATMAP(heatmap_inputs)
 
-    mqc_files = sorted_mqc.map { meta, f -> tuple(meta.id, f) }
-        .mix(nr_mqc.map  { meta, f -> tuple(meta.id, f) })
-        .mix(neg_mqc.map { meta, f -> tuple(meta.id, f) })
-        .mix(clf_mqc.map { meta, f -> tuple(meta.id, f) })
-        .mix(bias.mqc.map { meta, f -> tuple(meta.id, f) })
+    mqc_files = flattenMqc(sorted_mqc)
+        .mix(flattenMqc(nr_mqc))
+        .mix(flattenMqc(neg_mqc))
+        .mix(flattenMqc(clf_mqc))
+        .mix(flattenMqc(bias.mqc))
         .mix(scatter.mqc)
         .mix(heatmap)
         .groupTuple()

@@ -10,27 +10,46 @@ include { SAMPLE_NEGATIVES } from './workflows/sample_negatives'
 include { TRAIN_BASELINE }   from './workflows/train_baseline'
 include { QC }               from './workflows/qc'
 
+// samplesheetToList() represents a blank optional cell as [] (empty list),
+// not null, regardless of the field's declared type -- so a plain `!= null`
+// check isn't enough to detect "not given" for numeric fields where 0 is a
+// legitimate override value.
+def isGiven(v) {
+    !(v == null || v == [])
+}
+
 // One row per PPI dataset. Anything left blank in the samplesheet falls
 // back to the corresponding default in nextflow.config, so a single run
 // can process several datasets in parallel, each with its own overrides.
 def buildDatasetsChannel() {
+    // samplesheetToList() returns each row as a plain positional list (not
+    // a map) unless schema properties are marked "meta" -- this must match
+    // assets/schema_input.json's `properties` order exactly.
+    def fields = [
+        "id", "ppis", "sequences", "go_annotations", "species", "blast_results", "candidate_network",
+        "embedding_model", "cdhit_identity", "cdhit_wordsize", "split_method", "edge_weight",
+        "kahip_k", "ilp_kahip_k", "train_split", "val_split", "test_split", "ilp_epsilon",
+        "negative_sampling_method",
+    ]
     def rows = samplesheetToList(params.samplesheet, "${projectDir}/assets/schema_input.json")
 
-    return channel.fromList(rows).map { row ->
+    return channel.fromList(rows).map { rowList ->
+        def row = [fields, rowList].transpose().collectEntries { k, v -> [(k): v] }
+
         def meta = [
             id                       : row.id,
-            embedding_model          : row.embedding_model          ?: params.embedding_model,
-            cdhit_identity           : row.cdhit_identity           != null ? row.cdhit_identity : params.cdhit_identity,
-            cdhit_wordsize           : row.cdhit_wordsize           != null ? row.cdhit_wordsize : params.cdhit_wordsize,
-            split_method             : row.split_method             ?: params.split_method,
-            edge_weight              : row.edge_weight              ?: params.edge_weight,
-            kahip_k                  : row.kahip_k                  != null ? row.kahip_k : params.kahip_k,
-            ilp_kahip_k              : row.ilp_kahip_k              != null ? row.ilp_kahip_k : params.ilp_kahip_k,
-            train_split              : row.train_split              != null ? row.train_split : params.train_split,
-            val_split                : row.val_split                != null ? row.val_split : params.val_split,
-            test_split               : row.test_split               != null ? row.test_split : params.test_split,
-            ilp_epsilon              : row.ilp_epsilon              != null ? row.ilp_epsilon : params.ilp_epsilon,
-            negative_sampling_method : row.negative_sampling_method ?: params.negative_sampling_method,
+            embedding_model          : isGiven(row.embedding_model)          ? row.embedding_model          : params.embedding_model,
+            cdhit_identity           : isGiven(row.cdhit_identity)           ? row.cdhit_identity           : params.cdhit_identity,
+            cdhit_wordsize           : isGiven(row.cdhit_wordsize)           ? row.cdhit_wordsize           : params.cdhit_wordsize,
+            split_method             : isGiven(row.split_method)             ? row.split_method             : params.split_method,
+            edge_weight              : isGiven(row.edge_weight)              ? row.edge_weight              : params.edge_weight,
+            kahip_k                  : isGiven(row.kahip_k)                  ? row.kahip_k                  : params.kahip_k,
+            ilp_kahip_k              : isGiven(row.ilp_kahip_k)              ? row.ilp_kahip_k              : params.ilp_kahip_k,
+            train_split              : isGiven(row.train_split)              ? row.train_split              : params.train_split,
+            val_split                : isGiven(row.val_split)                ? row.val_split                : params.val_split,
+            test_split               : isGiven(row.test_split)               ? row.test_split               : params.test_split,
+            ilp_epsilon              : isGiven(row.ilp_epsilon)              ? row.ilp_epsilon              : params.ilp_epsilon,
+            negative_sampling_method : isGiven(row.negative_sampling_method) ? row.negative_sampling_method : params.negative_sampling_method,
         ]
         tuple(meta,
             file(row.ppis, checkIfExists: true),
