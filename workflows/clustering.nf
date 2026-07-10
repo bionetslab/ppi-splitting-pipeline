@@ -1,4 +1,4 @@
-include { RUN_BLAST; MAKE_METIS; RUN_KAHIP } from '../modules/clustering'
+include { RUN_BLAST; MAKE_METIS; RUN_KAHIP } from '../processes/clustering'
 
 // Builds the protein similarity graph (BLAST all-vs-all -> METIS graph) and
 // partitions it with KaHIP, ready for SPLIT_POSITIVES to assign train/val/test.

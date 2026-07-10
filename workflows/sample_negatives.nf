@@ -1,6 +1,6 @@
 // Aliased because the "random" sampler process is itself named SAMPLE_NEGATIVES,
 // which would otherwise collide with this subworkflow's own name.
-include { SAMPLE_NEGATIVES_DEGREE; SAMPLE_NEGATIVES_ILP } from '../modules/negative_sampling'
+include { SAMPLE_NEGATIVES_DEGREE; SAMPLE_NEGATIVES_ILP } from '../processes/negative_sampling'
 
 // Samples negative PPIs for each split, using either the default random
 // sampler or the bias-aware ILP sampler, selected per-dataset via

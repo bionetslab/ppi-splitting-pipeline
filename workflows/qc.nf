@@ -1,4 +1,4 @@
-include { BIAS_ANALYSIS; COLLECT_BIAS; SIMILARITY_HEATMAP; MULTIQC } from '../modules/qc'
+include { BIAS_ANALYSIS; COLLECT_BIAS; SIMILARITY_HEATMAP; MULTIQC } from '../processes/qc'
 
 // Some mqc-emitting processes emit a glob (e.g. "*_mqc.tsv") that can match
 // more than one file per task, which Nextflow packs into a List for that

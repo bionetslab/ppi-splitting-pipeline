@@ -1,4 +1,4 @@
-include { EMBED_SEQUENCES; TRAIN_CLASSIFIER } from '../modules/training'
+include { EMBED_SEQUENCES; TRAIN_CLASSIFIER } from '../processes/training'
 
 // Embeds train/val/test sequences (unless a precomputed .npz is supplied
 // per-dataset via meta.embedding_model) and trains the baseline classifier

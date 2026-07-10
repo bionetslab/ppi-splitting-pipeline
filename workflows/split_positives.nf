@@ -1,4 +1,4 @@
-include { SORT_PPIS; SOLVE_ILP; CDHIT2D; REMOVE_REDUNDANT } from '../modules/splitting'
+include { SORT_PPIS; SOLVE_ILP; CDHIT2D; REMOVE_REDUNDANT } from '../processes/splitting'
 
 // Assigns PPIs to train/val/test (via KaHIP-based sorting or the ILP
 // splitter, chosen per-dataset via meta.split_method), then removes

@@ -1,4 +1,4 @@
-include { FETCH_DATA; GET_LENGTHS } from '../modules/data_prep'
+include { FETCH_DATA; GET_LENGTHS } from '../processes/data_prep'
 
 // Fetches sequences/GO annotations/species from UniProt (unless already
 // supplied per-dataset via the samplesheet's sequences/go_annotations/species
