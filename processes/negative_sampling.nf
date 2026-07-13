@@ -41,7 +41,7 @@ process SAMPLE_NEGATIVES_ILP {
     def cand_arg = candidate_network ? "--candidate-network ${candidate_network}" : ''
     def lic_arg  = gurobi_license    ? "--gurobi-license ${gurobi_license}"        : ''
     def neg_ratio_adj = neg_ratio / (task.attempt as double)  // reduce neg_ratio for retries to avoid infeasibility
-    def max_candidates_adj = 200000 * (task.attempt as double)  // increase max_candidates for retries to avoid infeasibility
+    def max_candidates_adj = 200000 * task.attempt  // increase max_candidates for retries to avoid infeasibility
     """
     sample_negatives_ilp.py \\
         --positives          ${positives} \\
