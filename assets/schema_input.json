@@ -106,6 +106,10 @@
         "minimum": 0.01,
         "maximum": 0.5
       },
+      "ilp_max_sec": {
+        "type": "number",
+        "minimum": 1
+      },
       "negative_sampling_method": {
         "type": "string",
         "enum": ["default", "ilp", "uniform"]
@@ -114,6 +118,10 @@
         "type": "number",
         "minimum": 0,
         "maximum": 1
+      },
+      "neg_ilp_time_limit": {
+        "type": "number",
+        "minimum": 1
       },
       "neg_ilp_alpha_bias": {
         "type": "number",
