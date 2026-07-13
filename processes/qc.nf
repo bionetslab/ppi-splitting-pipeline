@@ -1,5 +1,6 @@
 process BIAS_ANALYSIS {
     tag "${meta.id}_${attribute}"
+    label 'error_retry'
 
     input:
     tuple val(meta), val(attribute),

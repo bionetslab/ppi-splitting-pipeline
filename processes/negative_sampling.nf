@@ -26,6 +26,7 @@ process SAMPLE_NEGATIVES_DEGREE {
 process SAMPLE_NEGATIVES_ILP {
     publishDir(path: { "${params.outdir}/${meta.id}" }, mode: 'copy', saveAs: { f -> f.endsWith('_mqc.tsv') ? null : f })
     tag "${meta.id}_${label}"
+    label 'error_retry'
 
     input:
     tuple val(meta), val(label), path(positives), val(neg_ratio), path(species), path(go_annotations), path(candidate_network)  // label: "train" | "val" | "test_balanced" | "test_realistic"; candidate_network optional, [] if unset
@@ -38,12 +39,14 @@ process SAMPLE_NEGATIVES_ILP {
     script:
     def cand_arg = candidate_network ? "--candidate-network ${candidate_network}" : ''
     def lic_arg  = gurobi_license    ? "--gurobi-license ${gurobi_license}"        : ''
+    def neg_ratio_adj = neg_ratio / (task.attempt as double)  // reduce neg_ratio for retries to avoid infeasibility
+    def max_candidates_adj = 200000 * (task.attempt as double)  // increase max_candidates for retries to avoid infeasibility
     """
     sample_negatives_ilp.py \\
         --positives          ${positives} \\
         --output             ${label}.csv \\
         --split-name         ${label} \\
-        --neg-ratio          ${neg_ratio} \\
+        --neg-ratio          ${neg_ratio_adj} \\
         --species            ${species} \\
         --go-annotations     ${go_annotations} \\
         ${cand_arg} \\
@@ -62,7 +65,7 @@ process SAMPLE_NEGATIVES_ILP {
         --seed               ${params.seed} \\
         --diagnostics-out    ${label}_mqc.tsv \\
         --residuals-out      ${label}_residuals_mqc.tsv \\
-        --max-candidates    200000 \\
+        --max-candidates     ${max_candidates_adj} \\
         --verbose \\
         --id                 ${meta.id}
     """

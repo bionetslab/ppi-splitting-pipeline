@@ -28,6 +28,7 @@ process EMBED_SEQUENCES {
 
 process TRAIN_CLASSIFIER {
     tag "${meta.id}"
+    label 'error_retry'
 
     input:
     tuple val(meta), path(train_csv), path(val_csv), path(test_balanced_csv), path(test_realistic_csv), path(embeddings)
