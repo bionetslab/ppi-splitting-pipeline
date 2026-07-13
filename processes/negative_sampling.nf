@@ -1,6 +1,7 @@
 process SAMPLE_NEGATIVES_DEGREE {
     publishDir(path: { "${params.outdir}/${meta.id}" }, mode: 'copy', saveAs: { f -> f.endsWith('_mqc.tsv') ? null : f })
     tag "${meta.id}_${label}"
+    label 'error_retry'
 
     input:
     tuple val(meta), val(label), path(positives), val(ratio), val(uniform)  // label: "train" | "val" | "test_balanced" | "test_realistic"
