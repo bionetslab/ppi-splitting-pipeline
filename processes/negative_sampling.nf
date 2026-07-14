@@ -28,6 +28,7 @@ process SAMPLE_NEGATIVES_ILP {
     publishDir(path: { "${params.outdir}/${meta.id}" }, mode: 'copy', saveAs: { f -> f.endsWith('_mqc.tsv') ? null : f })
     tag "${meta.id}_${label}"
     label 'error_retry'
+    label 'gurobi'
 
     input:
     tuple val(meta), val(label), path(positives), val(neg_ratio), path(species), path(go_annotations), path(candidate_network)  // label: "train" | "val" | "test_balanced" | "test_realistic"; candidate_network optional, [] if unset

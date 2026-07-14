@@ -82,6 +82,8 @@ process CDHIT2D {
 
 process SOLVE_ILP {
     tag "${meta.id}"
+    label 'error_retry'
+    label 'gurobi'
 
     input:
     tuple val(meta), path(ppis), path(fasta), path(partition), path(node_mapping)
