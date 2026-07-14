@@ -65,6 +65,11 @@ def sample_negatives(rows, ratio=1, degree_weighted=True, seed=42):
 
 
 def write_combined(pos_rows, negatives, path):
+    if pos_rows and "label" in pos_rows[0]:
+        raise ValueError(
+            "--positives already has a 'label' column -- refusing to relabel "
+            "what looks like a previously-combined pos/neg file as all-positive"
+        )
     extra_fields = [k for k in (pos_rows[0].keys() if pos_rows else [])
                     if k not in ("protein1", "protein2")]
     fieldnames = ["protein1", "protein2", "label"] + extra_fields
