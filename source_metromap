@@ -1,16 +1,17 @@
 %%metro title: PPI splitting pipeline
-%%metro diamond_style: symmetric
 %%metro line_order: definition
-%%metro line_spread: centered
+%%metro diamond_style: symmetric
+%%metro compact_offsets: true
 %%metro font_scale: 1.5
-%%metro track_gap: 1
+%%metro track_gap: 2
 %%metro mode: light
 %%metro style: seqera
-%%metro line: pos_kahip_neg_random | Pos. split: KaHIP, Neg. Sampling: random | #70d6ff
-%%metro line: pos_kahip_neg_ilp | Pos. split: KaHIP, Neg. Sampling: ILP | #ff70a6
-%%metro line: pos_ilp_neg_random | Pos. split: ILP, Neg. Sampling: random | #ff9770
-%%metro line: pos_ilp_neg_ilp | Pos. split: ILP, Neg. Sampling: ILP | #ffd670
-%%metro line: pos_random_neg_random | Pos. split: Random, Neg. Sampling: random | #70ffd4
+%%metro line: main | Main (best practice split only) | #003a7d
+%%metro line: pos_ilp_neg_random | Pos. split: ILP, Neg. Sampling: random | #008dff
+%%metro line: pos_ilp_neg_ilp | Pos. split: ILP, Neg. Sampling: ILP |#ff73b6
+%%metro line: pos_kahip_neg_random | Pos. split: KaHIP, Neg. Sampling: random | #4ecb8d
+%%metro line: pos_kahip_neg_ilp | Pos. split: KaHIP, Neg. Sampling: ILP | #ff9d3a
+%%metro line: pos_random_neg_random | Pos. split: Random, Neg. Sampling: random |#f9e858
 %%metro grid: data_prep | 0,0
 %%metro grid: clustering | 0,1
 %%metro grid: split_positives | 1,1
@@ -63,6 +64,7 @@ graph LR
 
         solve_ilp -->|pos_ilp_neg_random| cdhit2d
         solve_ilp -->|pos_ilp_neg_ilp| cdhit2d
+        solve_ilp -->|main| cdhit2d
 
         %%split_random -->|pos_random_neg_random| cdhit2d
 
@@ -70,6 +72,7 @@ graph LR
         cdhit2d -->|pos_kahip_neg_ilp| remove_redundant
         cdhit2d -->|pos_ilp_neg_random| remove_redundant
         cdhit2d -->|pos_ilp_neg_ilp| remove_redundant
+        cdhit2d -->|main| remove_redundant
         %%cdhit2d -->|pos_random_neg_random| remove_redundant
     end
 
@@ -132,6 +135,7 @@ graph LR
     remove_redundant -->|pos_kahip_neg_ilp| sample_negatives_ilp
     remove_redundant -->|pos_ilp_neg_random| sample_negatives_degree
     remove_redundant -->|pos_ilp_neg_ilp| sample_negatives_ilp
+    remove_redundant -->|main| sample_negatives_ilp
     %%remove_redundant -->|pos_random_neg_random| sample_negatives_degree
 
     split_random -->|pos_random_neg_random| sample_negatives_degree
