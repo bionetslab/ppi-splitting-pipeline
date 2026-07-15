@@ -1,0 +1,145 @@
+%% Link to edit: 
+
+%%metro title: PPI splitting pipeline
+%%metro mode: light
+%%metro style: seqera
+%%metro line_order: span
+%%metro line: pos_kahip_neg_random | Pos. split: KaHIP, Neg. Sampling: random | #70d6ff
+%%metro line: pos_kahip_neg_ilp | Pos. split: KaHIP, Neg. Sampling: ILP | #ff70a6
+%%metro line: pos_ilp_neg_random | Pos. split: ILP, Neg. Sampling: random | #ff9770
+%%metro line: pos_ilp_neg_ilp | Pos. split: ILP, Neg. Sampling: ILP | #ffd670
+%%metro line: pos_random_neg_random | Pos. split: Random, Neg. Sampling: random | #70ffd4
+
+graph LR
+    subgraph data_prep [Data Prep]
+        fetch_data([Fetch Data])
+        get_lengths([Get Lengths])
+
+        fetch_data -->|pos_kahip_neg_random| get_lengths
+        fetch_data -->|pos_kahip_neg_ilp| get_lengths
+        fetch_data -->|pos_ilp_neg_random| get_lengths
+        fetch_data -->|pos_ilp_neg_ilp| get_lengths
+        fetch_data -->|pos_random_neg_random| get_lengths
+    end
+
+    subgraph clustering [Similarity-based partitioning]
+        run_blast([Run BLAST])
+        make_metis([Make METIS])
+        run_kahip_k3([Run KaHIP (k=3)])
+        run_kahip_k100([Run KaHIP (k=100)])
+
+        run_blast -->|pos_kahip_neg_random| make_metis
+        run_blast -->|pos_kahip_neg_ilp| make_metis
+        run_blast -->|pos_ilp_neg_random| make_metis
+        run_blast -->|pos_ilp_neg_ilp| make_metis
+        %%run_blast -->|pos_random_neg_random| make_metis
+
+        make_metis -->|pos_kahip_neg_random| run_kahip_k3
+        make_metis -->|pos_kahip_neg_ilp| run_kahip_k3
+        make_metis -->|pos_ilp_neg_random| run_kahip_k100
+        make_metis -->|pos_ilp_neg_ilp| run_kahip_k100
+        %%make_metis -->|pos_random_neg_random| run_kahip_k3
+    end
+
+    subgraph split_positives [Split Positives]
+        solve_ilp([Solve ILP])
+        sort_ppis([Sort PPIs])
+        split_random([Split Random])
+        cdhit2d([CD-Hit-2D])
+        remove_redundant([Remove Redundant])
+
+        sort_ppis -->|pos_kahip_neg_random| cdhit2d
+        sort_ppis -->|pos_kahip_neg_ilp| cdhit2d
+
+        solve_ilp -->|pos_ilp_neg_random| cdhit2d
+        solve_ilp -->|pos_ilp_neg_ilp| cdhit2d
+
+        %%split_random -->|pos_random_neg_random| cdhit2d
+
+        cdhit2d -->|pos_kahip_neg_random| remove_redundant
+        cdhit2d -->|pos_kahip_neg_ilp| remove_redundant
+        cdhit2d -->|pos_ilp_neg_random| remove_redundant
+        cdhit2d -->|pos_ilp_neg_ilp| remove_redundant
+        %%cdhit2d -->|pos_random_neg_random| remove_redundant
+    end
+
+    subgraph sample_negatives [Sample Negatives]
+    	sample_negatives_degree([Random, degree-preserving or uniform])
+        sample_negatives_ilp([Solve ILP for bias-minimization])
+    end
+
+    subgraph train_baseline [Train Baseline]
+        embed_sequences([Embed Sequences])
+        train_classifier([Train Classifier])
+
+        embed_sequences -->|pos_kahip_neg_random| train_classifier
+        embed_sequences -->|pos_kahip_neg_ilp| train_classifier
+        embed_sequences -->|pos_ilp_neg_random| train_classifier
+        embed_sequences -->|pos_ilp_neg_ilp| train_classifier
+        embed_sequences -->|pos_random_neg_random| train_classifier
+    end
+
+    subgraph qc [QC]
+        bias_analysis([Bias Analysis])
+        similarity_heatmap([Similarity Heatmap])
+        collect_bias([Collect Biases])
+        multiqc([MultiQC Report])
+
+        bias_analysis -->|pos_kahip_neg_random| collect_bias
+        bias_analysis -->|pos_kahip_neg_ilp| collect_bias
+        bias_analysis -->|pos_ilp_neg_random| collect_bias
+        bias_analysis -->|pos_ilp_neg_ilp| collect_bias
+        bias_analysis -->|pos_random_neg_random| collect_bias
+
+        collect_bias -->|pos_kahip_neg_random| multiqc
+        collect_bias -->|pos_kahip_neg_ilp| multiqc
+        collect_bias -->|pos_ilp_neg_random| multiqc
+        collect_bias -->|pos_ilp_neg_ilp| multiqc
+        collect_bias -->|pos_random_neg_random| multiqc
+
+        similarity_heatmap -->|pos_kahip_neg_random| multiqc
+        similarity_heatmap -->|pos_kahip_neg_ilp| multiqc
+        similarity_heatmap -->|pos_ilp_neg_random| multiqc
+        similarity_heatmap -->|pos_ilp_neg_ilp| multiqc
+        similarity_heatmap -->|pos_random_neg_random| multiqc
+    end
+
+    %% Inter-section edges
+    get_lengths -->|pos_kahip_neg_random| run_blast
+    get_lengths -->|pos_kahip_neg_ilp| run_blast
+    get_lengths -->|pos_ilp_neg_random| run_blast
+    get_lengths -->|pos_ilp_neg_ilp| run_blast
+    fetch_data -->|pos_random_neg_random| split_random
+
+  	run_kahip_k3 -->|pos_kahip_neg_random| sort_ppis
+    run_kahip_k3 -->|pos_kahip_neg_ilp| sort_ppis
+    %%run_kahip_k3 -->|pos_random_neg_random| split_random
+
+    run_kahip_k100 -->|pos_ilp_neg_random| solve_ilp
+    run_kahip_k100 -->|pos_ilp_neg_ilp| solve_ilp
+
+    remove_redundant -->|pos_kahip_neg_random| sample_negatives_degree
+    remove_redundant -->|pos_kahip_neg_ilp| sample_negatives_ilp
+    remove_redundant -->|pos_ilp_neg_random| sample_negatives_degree
+    remove_redundant -->|pos_ilp_neg_ilp| sample_negatives_ilp
+    %%remove_redundant -->|pos_random_neg_random| sample_negatives_degree
+
+    split_random -->|pos_random_neg_random| sample_negatives_degree
+
+    sample_negatives_degree -->|pos_kahip_neg_random| embed_sequences
+    sample_negatives_degree -->|pos_ilp_neg_random| embed_sequences
+    sample_negatives_degree -->|pos_random_neg_random| embed_sequences
+    sample_negatives_ilp -->|pos_kahip_neg_ilp| embed_sequences
+    sample_negatives_ilp -->|pos_ilp_neg_ilp| embed_sequences
+
+    embed_sequences -->|pos_kahip_neg_random| bias_analysis
+    embed_sequences -->|pos_ilp_neg_random| bias_analysis
+    embed_sequences -->|pos_kahip_neg_ilp| bias_analysis
+    embed_sequences -->|pos_ilp_neg_ilp| bias_analysis
+    embed_sequences -->|pos_random_neg_random| bias_analysis
+
+    remove_redundant -->|pos_kahip_neg_random| similarity_heatmap
+    remove_redundant -->|pos_ilp_neg_random| similarity_heatmap
+    remove_redundant -->|pos_kahip_neg_ilp| similarity_heatmap
+    remove_redundant -->|pos_ilp_neg_ilp| similarity_heatmap
+    split_random -->|pos_random_neg_random| similarity_heatmap
