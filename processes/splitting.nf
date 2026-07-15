@@ -111,7 +111,7 @@ process SOLVE_ILP {
         --val-split   ${meta.val_split} \\
         --test-split  ${meta.test_split} \\
         --epsilon     ${meta.ilp_epsilon} \\
-        --max-sec     ${params.ilp_max_sec} \\
+        --max-sec     ${meta.ilp_max_sec} \\
         ${params.ilp_solver ? "--solver ${params.ilp_solver}" : ""}
     """
 }

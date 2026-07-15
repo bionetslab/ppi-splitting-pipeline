@@ -46,6 +46,7 @@ process MAKE_METIS {
 process RUN_KAHIP {
     publishDir(path: { "${params.outdir}/${meta.id}/similarities" }, mode: 'copy')
     tag "${meta.id}: k=${k}"
+    label 'error_retry'
 
     input:
     tuple val(meta), path(graph), val(k)

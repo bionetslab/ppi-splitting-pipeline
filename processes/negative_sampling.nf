@@ -4,7 +4,12 @@ process SAMPLE_NEGATIVES_DEGREE {
     label 'error_retry'
 
     input:
-    tuple val(meta), val(label), path(positives), val(ratio), val(uniform)  // label: "train" | "val" | "test_balanced" | "test_realistic"
+    // positives is staged under a fixed name distinct from any "${label}.csv"
+    // output -- otherwise for label in {train, val} the staged input symlink
+    // and the output file share a name, and writing the output follows the
+    // symlink back into the upstream task's work dir, corrupting its cached
+    // output (bites you specifically on -resume, once that cache is reused).
+    tuple val(meta), val(label), path(positives, stageAs: 'positives_in.csv'), val(ratio), val(uniform)  // label: "train" | "val" | "test_balanced" | "test_realistic"
 
     output:
     tuple val(meta), val(label), path("${label}.csv"), emit: labelled
@@ -31,7 +36,9 @@ process SAMPLE_NEGATIVES_ILP {
     label 'gurobi'
 
     input:
-    tuple val(meta), val(label), path(positives), val(neg_ratio), path(species), path(go_annotations), path(candidate_network)  // label: "train" | "val" | "test_balanced" | "test_realistic"; candidate_network optional, [] if unset
+    // positives is staged under a fixed name distinct from any "${label}.csv"
+    // output -- see SAMPLE_NEGATIVES_DEGREE above for why that matters.
+    tuple val(meta), val(label), path(positives, stageAs: 'positives_in.csv'), val(neg_ratio), path(species), path(go_annotations), path(candidate_network)  // label: "train" | "val" | "test_balanced" | "test_realistic"; candidate_network optional, [] if unset
     path gurobi_license  // optional; [] if params.gurobi_license is unset
 
     output:
@@ -61,7 +68,7 @@ process SAMPLE_NEGATIVES_ILP {
         --lambda-jaccard     ${meta.neg_ilp_lambda_jaccard} \\
         --degree-bias-mode   ${params.neg_ilp_degree_bias_mode} \\
         --solver             ${params.neg_ilp_solver} \\
-        --time-limit         ${params.neg_ilp_time_limit} \\
+        --time-limit         ${meta.neg_ilp_time_limit} \\
         --mip-gap            ${params.neg_ilp_mip_gap} \\
         --threads            ${task.cpus} \\
         --seed               ${params.seed} \\
