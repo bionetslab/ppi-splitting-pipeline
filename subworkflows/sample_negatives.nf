@@ -23,7 +23,13 @@ workflow SAMPLE_NEGATIVES {
         .mix(test_ppis.map { meta, f -> tuple(meta, "test_realistic", f, 10.0) })
 
     branched = splits_ch.branch { meta, label, f, ratio ->
-        ilp:     meta.negative_sampling_method == "ilp"
+        // test_realistic is excluded here even when negative_sampling_method
+        // is "ilp" -- it falls through to the "default" branch below, whose
+        // mapping already forces uniform negatives for that label. The
+        // realistic test set is meant to simulate an uncontrolled random
+        // screen, not one bias-matched to the positives, so the bias-aware
+        // ILP sampler would defeat its purpose.
+        ilp:     meta.negative_sampling_method == "ilp" && label != "test_realistic"
         // Deliberately naive baseline: uniform-at-random negatives for
         // every split (not just test_realistic), paired with
         // split_method=random -- see processes/splitting.nf's
@@ -48,6 +54,9 @@ workflow SAMPLE_NEGATIVES {
     ilp_out = SAMPLE_NEGATIVES_ILP(ilp_inputs, neg_gurobi_license_ch)
 
     uniform_inputs = branched.uniform.map { meta, label, f, ratio -> tuple(meta, label, f, ratio, true) }
+    // label == "test_realistic" here also catches the "ilp" method's
+    // test_realistic item, since the branch above routes it here instead of
+    // to SAMPLE_NEGATIVES_ILP.
     default_inputs = branched.default.map { meta, label, f, ratio ->
         tuple(meta, label, f, ratio, label == "test_realistic")
     }

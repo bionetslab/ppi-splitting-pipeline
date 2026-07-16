@@ -49,9 +49,10 @@ process SAMPLE_NEGATIVES_ILP {
     def cand_arg = candidate_network ? "--candidate-network ${candidate_network}" : ''
     def lic_arg  = gurobi_license    ? "--gurobi-license ${gurobi_license}"        : ''
     //def neg_ratio_adj = neg_ratio / (task.attempt as double)  // reduce neg_ratio for retries to avoid infeasibility
-    def n_positives        = positives.countLines() - 1  // -1 for the header row
-    def max_candidates_adj = 4 * n_positives * task.attempt  // pool size relative to the positive set; grows on retry to avoid infeasibility
     """
+    n_positives=\$(( \$(wc -l < ${positives}) - 1 ))  # -1 for the header row
+    max_candidates=\$(( 4 * n_positives * ${task.attempt} ))
+
     sample_negatives_ilp.py \\
         --positives          ${positives} \\
         --output             ${label}.csv \\
@@ -75,7 +76,7 @@ process SAMPLE_NEGATIVES_ILP {
         --seed               ${params.seed} \\
         --diagnostics-out    ${label}_mqc.tsv \\
         --residuals-out      ${label}_residuals_mqc.tsv \\
-        --max-candidates     ${max_candidates_adj} \\
+        --max-candidates     \$max_candidates \\
         --verbose \\
         --id                 ${meta.id}
     """
