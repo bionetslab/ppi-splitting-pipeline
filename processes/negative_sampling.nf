@@ -48,14 +48,15 @@ process SAMPLE_NEGATIVES_ILP {
     script:
     def cand_arg = candidate_network ? "--candidate-network ${candidate_network}" : ''
     def lic_arg  = gurobi_license    ? "--gurobi-license ${gurobi_license}"        : ''
-    def neg_ratio_adj = neg_ratio / (task.attempt as double)  // reduce neg_ratio for retries to avoid infeasibility
-    def max_candidates_adj = 200000 * task.attempt  // increase max_candidates for retries to avoid infeasibility
+    //def neg_ratio_adj = neg_ratio / (task.attempt as double)  // reduce neg_ratio for retries to avoid infeasibility
+    def n_positives        = positives.countLines() - 1  // -1 for the header row
+    def max_candidates_adj = 4 * n_positives * task.attempt  // pool size relative to the positive set; grows on retry to avoid infeasibility
     """
     sample_negatives_ilp.py \\
         --positives          ${positives} \\
         --output             ${label}.csv \\
         --split-name         ${label} \\
-        --neg-ratio          ${neg_ratio_adj} \\
+        --neg-ratio          ${neg_ratio} \\
         --species            ${species} \\
         --go-annotations     ${go_annotations} \\
         ${cand_arg} \\
