@@ -1,0 +1,159 @@
+%%metro title: PPI splitting pipeline
+%%metro line_order: definition
+%%metro diamond_style: symmetric
+%%metro compact_offsets: true
+%%metro font_scale: 1.5
+%%metro track_gap: 2
+%%metro mode: light
+%%metro style: seqera
+%%metro line: main | Main (best practice split only) | #003a7d
+%%metro line: pos_ilp_neg_random | Pos. split: ILP, Neg. Sampling: random | #008dff
+%%metro line: pos_ilp_neg_ilp | Pos. split: ILP, Neg. Sampling: ILP |#ff73b6
+%%metro line: pos_kahip_neg_random | Pos. split: KaHIP, Neg. Sampling: random | #4ecb8d
+%%metro line: pos_kahip_neg_ilp | Pos. split: KaHIP, Neg. Sampling: ILP | #ff9d3a
+%%metro line: pos_random_neg_random | Pos. split: Random, Neg. Sampling: random |#f9e858
+%%metro grid: data_prep | 0,0
+%%metro grid: clustering | 0,1
+%%metro grid: split_positives | 1,1
+%%metro grid: sample_negatives | 2,1
+%%metro grid: train_baseline | 3,2
+%%metro grid: qc | 2,3
+
+%% Link to edit: https://seqeralabs.github.io/nf-metro/latest/playground/#mmd-gz=H4sIAAAAAAAAE51YW0_rOBB-Pv0VI60iBYmiFlagrbQrHeDsghZWPZS3CEUmmaQWuWG7SBzx41dO2tSxXePAUzOe75vJ3DwhCEoUrAZBRYELWC5vgTcFFYJWOTS0wYJWOAm2WiklZV2lMRfvUpu_l1JOk15Basc1S5EtIMWMVlTQuhoe84YhSReQYCWQYdqfZnUlYp4QST0_OevlgpHkJc5Js4B5LyzrFBdQ0HwtetnOLXxFRgZGF9DUPH4ha9rEFeYxI1Val_ABy5qfdG-8gH_Jze3yGP7D_ARWpGwKWuUL6FV_u5il51nm5KVF40V6e7eUjFl2MSPnFkZaOPy8vXN5mWV_XFzMHJymjzbC3sP03MrWGTzs5EMrdEYzy9Lfe-ac0XQBKREkbhhKD2fHM-00KTZcIJOlKY_n2nFrOW5qTgV9Qw4fMDd1pCco3SY7pVNDSTBCq_iZ8Lb64QPOjk81ldekRZ5NJpOckWYNdw8TAAC-ee6e928SXRNBYMmweWpV5F-GIlnHUieM_pa_QSo9HfUKOYq4wCoXax5G_6CAu-7h6WhiIYHp9K8PW4V_qER-QFo03qhhmY6GjTFl1JuJxCqdDJOgFEy0oiUtCKPifSozm0JDmGjHE63yfWbYpoqfC8JFGD1sKri8-756VPJSkheMSxSUh9E9eUG4__F4u1IUJL4L5stZR9FOAAhf_jw7suvNZzNNcz6bHamZ7p1yJHrvmResjb0XRk_yKNAhM0FgYiwptiAtqXBERU2HH7L12Bemx2aYVR-kbk6FBYEFaImS4a3ZCfpsjFZSICd2J9g3AK-LN5RuhdFK_pQ3gVK3vGYibhpZ_6uaCbkxcPW4tdM5Fm6NdFeBopSkaypO0zC6up7eUDE9vVYbA8v6DWOG6aZKSSX7sJXAw06iKJtuOWpha9YL06ZlBzBjc7AATBuHEAMLxvsEgRpJV_IPUmwPXM2hhdoD2pWrL85oj7FAt7kg0HG25rChLQ2iLwZRu7SgXGCI0iLfdMU4xZwhhtFu4-mepw1DjuxN3j01g01Fs5qpTWDwDFsOsprBMyV8WtKKlvQXkVfVFm-6r60s0aN8hsvt8767sXzGNOb4usEqQR5GP6QAVjuB4mBHmRSEc5pRZOGW9KqXqFeURuyoOp13BEVbDqPxehV-meBr5i01aeUwk_qaQPTzap88WQ4xqUjxzuX8vaSEw_fto1pZ_aYTr5GIksi66mVw08nUeVwXBSYilvxhdNU9gaQfFES5KQR9TcLoXv74eQUP2NRMqFUw8NA1ihWL3uBuYvojjdk8HjrWpG0-29DW0LuWuy70vrBu6_LBGMvdGJC_Gdtqp-Ec5TsiMF5gq98O5GdB8oCONflJwPpZEQRwK_-NMuWYyAsCMM2xqzPl8-iTBbldwz0w_a7qBtiWYj-ExYDfp6C6LE221fRNXYsdEejXwBb4Caj1cIjoPmUMjKeX-pfgwSj2m6QPaOumiuhg2jLkCot9z_Gl6Tyw7DhuAuOtv-LFMAqHfAiCgwS23Dkc6W5tz339cyK7giNV2ubhxaIH-isclrfzolE_h7SKGY0f5NqG7ual93Y6uNedWD2C_kjtncebHAmz5MkEj54PxuU1srNH4vXR8kXzLrB3C5vw_wEwWhpLSBkAAA
+
+graph LR
+    subgraph data_prep [Data Prep]
+        fetch_data([Fetch Data])
+        get_lengths([Get Lengths])
+
+        fetch_data -->|pos_kahip_neg_random| get_lengths
+        fetch_data -->|pos_kahip_neg_ilp| get_lengths
+        fetch_data -->|pos_ilp_neg_random| get_lengths
+        fetch_data -->|pos_ilp_neg_ilp| get_lengths
+        fetch_data -->|pos_random_neg_random| get_lengths
+    end
+
+    subgraph clustering [Similarity-based partitioning]
+        run_blast([Run BLAST])
+        make_metis([Make METIS])
+        run_kahip_k3([Run KaHIP (k=3)])
+        run_kahip_k100([Run KaHIP (k=100)])
+
+        run_blast -->|pos_kahip_neg_random| make_metis
+        run_blast -->|pos_kahip_neg_ilp| make_metis
+        run_blast -->|pos_ilp_neg_random| make_metis
+        run_blast -->|pos_ilp_neg_ilp| make_metis
+        %%run_blast -->|pos_random_neg_random| make_metis
+
+        make_metis -->|pos_kahip_neg_random| run_kahip_k3
+        make_metis -->|pos_kahip_neg_ilp| run_kahip_k3
+        make_metis -->|pos_ilp_neg_random| run_kahip_k100
+        make_metis -->|pos_ilp_neg_ilp| run_kahip_k100
+        %%make_metis -->|pos_random_neg_random| run_kahip_k3
+    end
+
+    subgraph split_positives [Split Positives]
+        solve_ilp([Solve ILP])
+        sort_ppis([Sort PPIs])
+        split_random([Split Random])
+        cdhit2d([CD-Hit-2D])
+        remove_redundant([Remove Redundant])
+
+        sort_ppis -->|pos_kahip_neg_random| cdhit2d
+        sort_ppis -->|pos_kahip_neg_ilp| cdhit2d
+
+        solve_ilp -->|pos_ilp_neg_random| cdhit2d
+        solve_ilp -->|pos_ilp_neg_ilp| cdhit2d
+        solve_ilp -->|main| cdhit2d
+
+        %%split_random -->|pos_random_neg_random| cdhit2d
+
+        cdhit2d -->|pos_kahip_neg_random| remove_redundant
+        cdhit2d -->|pos_kahip_neg_ilp| remove_redundant
+        cdhit2d -->|pos_ilp_neg_random| remove_redundant
+        cdhit2d -->|pos_ilp_neg_ilp| remove_redundant
+        cdhit2d -->|main| remove_redundant
+        %%cdhit2d -->|pos_random_neg_random| remove_redundant
+    end
+
+    subgraph sample_negatives [Sample Negatives]
+    	sample_negatives_degree([Random, degree-preserving or uniform])
+        sample_negatives_ilp([Solve ILP for bias-minimization])
+    end
+
+    subgraph train_baseline [Train Baseline]
+        embed_sequences([Embed Sequences])
+        train_classifier([Train Classifier])
+
+        embed_sequences -->|pos_kahip_neg_random| train_classifier
+        embed_sequences -->|pos_kahip_neg_ilp| train_classifier
+        embed_sequences -->|pos_ilp_neg_random| train_classifier
+        embed_sequences -->|pos_ilp_neg_ilp| train_classifier
+        embed_sequences -->|pos_random_neg_random| train_classifier
+    end
+
+    subgraph qc [QC]
+        bias_analysis([Bias Analysis])
+        similarity_heatmap([Similarity Heatmap])
+        collect_bias([Collect Biases])
+        multiqc([MultiQC Report])
+
+        bias_analysis -->|pos_kahip_neg_random| collect_bias
+        bias_analysis -->|pos_kahip_neg_ilp| collect_bias
+        bias_analysis -->|pos_ilp_neg_random| collect_bias
+        bias_analysis -->|pos_ilp_neg_ilp| collect_bias
+        bias_analysis -->|pos_random_neg_random| collect_bias
+
+        collect_bias -->|pos_kahip_neg_random| multiqc
+        collect_bias -->|pos_kahip_neg_ilp| multiqc
+        collect_bias -->|pos_ilp_neg_random| multiqc
+        collect_bias -->|pos_ilp_neg_ilp| multiqc
+        collect_bias -->|pos_random_neg_random| multiqc
+
+        similarity_heatmap -->|pos_kahip_neg_random| multiqc
+        similarity_heatmap -->|pos_kahip_neg_ilp| multiqc
+        similarity_heatmap -->|pos_ilp_neg_random| multiqc
+        similarity_heatmap -->|pos_ilp_neg_ilp| multiqc
+        similarity_heatmap -->|pos_random_neg_random| multiqc
+    end
+
+    %% Inter-section edges
+    get_lengths -->|pos_kahip_neg_random| run_blast
+    get_lengths -->|pos_kahip_neg_ilp| run_blast
+    get_lengths -->|pos_ilp_neg_random| run_blast
+    get_lengths -->|pos_ilp_neg_ilp| run_blast
+    fetch_data -->|pos_random_neg_random| split_random
+
+  	run_kahip_k3 -->|pos_kahip_neg_random| sort_ppis
+    run_kahip_k3 -->|pos_kahip_neg_ilp| sort_ppis
+    %%run_kahip_k3 -->|pos_random_neg_random| split_random
+
+    run_kahip_k100 -->|pos_ilp_neg_random| solve_ilp
+    run_kahip_k100 -->|pos_ilp_neg_ilp| solve_ilp
+
+    remove_redundant -->|pos_kahip_neg_random| sample_negatives_degree
+    remove_redundant -->|pos_kahip_neg_ilp| sample_negatives_ilp
+    remove_redundant -->|pos_ilp_neg_random| sample_negatives_degree
+    remove_redundant -->|pos_ilp_neg_ilp| sample_negatives_ilp
+    remove_redundant -->|main| sample_negatives_ilp
+    %%remove_redundant -->|pos_random_neg_random| sample_negatives_degree
+
+    split_random -->|pos_random_neg_random| sample_negatives_degree
+
+    sample_negatives_degree -->|pos_kahip_neg_random| embed_sequences
+    sample_negatives_degree -->|pos_ilp_neg_random| embed_sequences
+    sample_negatives_degree -->|pos_random_neg_random| embed_sequences
+    sample_negatives_ilp -->|pos_kahip_neg_ilp| embed_sequences
+    sample_negatives_ilp -->|pos_ilp_neg_ilp| embed_sequences
+
+    embed_sequences -->|pos_kahip_neg_random| bias_analysis
+    embed_sequences -->|pos_ilp_neg_random| bias_analysis
+    embed_sequences -->|pos_kahip_neg_ilp| bias_analysis
+    embed_sequences -->|pos_ilp_neg_ilp| bias_analysis
+    embed_sequences -->|pos_random_neg_random| bias_analysis
+
+    remove_redundant -->|pos_kahip_neg_random| similarity_heatmap
+    remove_redundant -->|pos_ilp_neg_random| similarity_heatmap
+    remove_redundant -->|pos_kahip_neg_ilp| similarity_heatmap
+    remove_redundant -->|pos_ilp_neg_ilp| similarity_heatmap
+    split_random -->|pos_random_neg_random| similarity_heatmap

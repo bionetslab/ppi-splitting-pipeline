@@ -1,5 +1,5 @@
 # PPI Splitting Pipeline
-![Pipeline overview](pipeline_overview.png)
+![Pipeline overview](metro_map.svg)
 
 Automated leakage-aware splitting of a protein–protein interaction (PPI) dataset into train, validation, and test sets, with redundancy removal, negative sampling, embedding-based classification, and bias analysis.
 
@@ -71,7 +71,7 @@ One combined report for the whole run: open `results/multiqc/multiqc_report.html
 
 ## Workflow
 
-![Pipeline overview](pipeline_overview.png)
+![Pipeline overview](metro_map.svg)
 
 
 ### Step descriptions
