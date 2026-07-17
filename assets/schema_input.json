@@ -53,6 +53,20 @@
         "errorMessage": "If supplied, must be a path to a csv containing scores for negative candidates with columns protein1,protein2,w",
         "pattern": "^*\\.csv$"
       },
+      "partition": {
+        "type": "string",
+        "format": "file-path",
+        "exists": true,
+        "errorMessage": "If supplied, partition must be a path to a KaHIP partition file partitioned_proteome.txt. Only used when --split_only is set (bypasses CLUSTERING).",
+        "pattern": "partitioned_proteome\\.txt$"
+      },
+      "node_mapping": {
+        "type": "string",
+        "format": "file-path",
+        "exists": true,
+        "errorMessage": "If supplied, node_mapping must be a path to an existing node_mapping.tsv. Only used when --split_only is set (bypasses CLUSTERING).",
+        "pattern": "node_mapping\\.tsv$"
+      },
       "embedding_model": {
         "type": "string",
         "errorMessage": "embedding_model must be 'none', 'esm2', 'prot_t5', or a path to a precomputed .npz",

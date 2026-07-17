@@ -122,13 +122,13 @@ dataset).
 
 Attributes analyzed:
 
-| Attribute                         | Description                                                                                                                               |
-|-----------------------------------|-------------------------------------------------------------------------------------------------------------------------------------------|
-| `sequence_similarity`             | BLASTp pident between the two proteins, normalized to [0, 1]                                                                              |
-| `embedding_similarity`            | Cosine similarity of the two individual protein embeddings                                                                                |
-| `functional_relatedness_BP/MF/CC` | Jaccard similarity of GO term sets (biological process / molecular function / cellular component)                                         |
-| `self_interactions`               | 1 if both proteins are identical, 0 otherwise                                                                                             |
-| `same_species`                    | 1 if both proteins share the same NCBI taxon ID, 0 otherwise (only included if the dataset contains proteins from more than one species)  |
+| Attribute                         | Description                                                                                                                                                                                                                                                                                                                                          |
+|-----------------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `sequence_similarity`             | BLASTp pident between the two proteins, normalized to [0, 1]                                                                                                                                                                                                                                                                                         |
+| `embedding_similarity`            | Cosine similarity of the two individual protein embeddings                                                                                                                                                                                                                                                                                           |
+| `functional_relatedness_BP/MF/CC` | Jaccard similarity of GO term sets (biological process / molecular function / cellular component)                                                                                                                                                                                                                                                    |
+| `self_interactions`               | 1 if both proteins are identical, 0 otherwise                                                                                                                                                                                                                                                                                                        |
+| `same_species`                    | 1 if both proteins share the same NCBI taxon ID, 0 otherwise (only included if the dataset contains proteins from more than one species)                                                                                                                                                                                                             |
 | `topology_shortcut`               | Each endpoint's training positive-rate (pos / (pos + neg) training degree), using whichever endpoint(s) occurred in training; only included if at least one val/test/test_balanced/test_realistic pair has an endpoint that occurred in training — see [Naive baseline: the topology shortcut](#naive-baseline-the-topology-shortcut-optional) below |
 
 **COLLECT_BIAS** — Aggregates all per-attribute TSVs into a single interactive Plotly scatter plot (NMI vs detectability, colored by attribute, shaped by split).
@@ -194,19 +194,20 @@ hippie,data/HIPPIE-current.csv,,,,
 string,data/string.csv,ilp,ilp,0.5,0.5
 ```
 
-| Column                                                                 | Overrides                   | Notes                                                                                                                            |
-|------------------------------------------------------------------------|-----------------------------|----------------------------------------------------------------------------------------------------------------------------------|
-| `id`                                                                   | —                           | Required. Used as the output subfolder name (`results/<id>/...`) and in logs.                                                    |
-| `ppis`                                                                 | —                           | Required. Path to this dataset's PPI CSV.                                                                                        |
-| `sequences`, `go_annotations`, `species`                               | UniProt fetch step          | Supply all three to skip `FETCH_DATA` for this dataset.                                                                          |
-| `blast_results`                                                        | BLAST step                  | Supply to skip `RUN_BLAST` for this dataset (a precomputed `all_vs_all.tsv`).                                                    |
-| `candidate_network`                                                    | —                           | Optional candidate pool CSV for the ILP negative sampler.                                                                        |
-| `embedding_model`, `cdhit_identity`, `cdhit_wordsize`                  | `params.*` of the same name | Defaults: `embedding_model`: esm2, `cdhit_identity`: 0.4, `cdhit_wordsize`: 2                                                    |
-| `split_method`, `edge_weight`, `kahip_k`, `ilp_kahip_k`, `ilp_epsilon` | `params.*` of the same name | Defaults: `split_method`: kahip (k=3), `edge_weight`: normalized_bitscore, `kahip_k`: 3, `ilp_kahip_k`: 100, `ilp_epsilon`: 0.05. `split_method=random` is a naive baseline, see below |
-| `train_split`, `val_split`, `test_split`                               | `params.*` of the same name | Defaults: 0.8, 0.1, 0.1                                                                                                          |
-| `negative_sampling_method`                                             | `params.*` of the same name | Defaults: default (alternatives: ilp, uniform — see below)                                                                        |
-| `neg_ilp_alpha_confidence`, `neg_ilp_alpha_bias`                       | `params.*` of the same name | Only used when `negative_sampling_method` is `ilp`; see [Bias-aware ILP negative sampling](#bias-aware-ilp-negative-sampling-optional) below. Highly dataset-specific, so overridable per row rather than fixed run-wide. |
-| `neg_ilp_lambda_degree`, `neg_ilp_lambda_taxon_pair`, `neg_ilp_lambda_self_loop`, `neg_ilp_lambda_jaccard` | `params.*` of the same name | Same as above.                                                                                                    |
+| Column                                                                                                     | Overrides                   | Notes                                                                                                                                                                                                                                                   |
+|------------------------------------------------------------------------------------------------------------|-----------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `id`                                                                                                       | —                           | Required. Used as the output subfolder name (`results/<id>/...`) and in logs.                                                                                                                                                                           |
+| `ppis`                                                                                                     | —                           | Required. Path to this dataset's PPI CSV.                                                                                                                                                                                                               |
+| `sequences`, `go_annotations`, `species`                                                                   | UniProt fetch step          | Supply all three to skip `FETCH_DATA` for this dataset.                                                                                                                                                                                                 |
+| `blast_results`                                                                                            | BLAST step                  | Supply to skip `RUN_BLAST` for this dataset (a precomputed `all_vs_all.tsv`).                                                                                                                                                                           |
+| `candidate_network`                                                                                        | —                           | Optional candidate pool CSV for the ILP negative sampler.                                                                                                                                                                                               |
+| `partition`, `node_mapping`                                                                                | Clustering step             | Only read when `--split_only` is set (see [Best-practice short run](#best-practice-short-run---split_only) below) — a precomputed `partitioned_proteome.txt`/`node_mapping.tsv` pair that lets that mode skip `CLUSTERING` entirely. Ignored otherwise. |
+| `embedding_model`, `cdhit_identity`, `cdhit_wordsize`                                                      | `params.*` of the same name | Defaults: `embedding_model`: esm2, `cdhit_identity`: 0.4, `cdhit_wordsize`: 2                                                                                                                                                                           |
+| `split_method`, `edge_weight`, `kahip_k`, `ilp_kahip_k`, `ilp_epsilon`                                     | `params.*` of the same name | Defaults: `split_method`: kahip (k=3), `edge_weight`: normalized_bitscore, `kahip_k`: 3, `ilp_kahip_k`: 100, `ilp_epsilon`: 0.05. `split_method=random` is a naive baseline, see below                                                                  |
+| `train_split`, `val_split`, `test_split`                                                                   | `params.*` of the same name | Defaults: 0.8, 0.1, 0.1                                                                                                                                                                                                                                 |
+| `negative_sampling_method`                                                                                 | `params.*` of the same name | Defaults: default (alternatives: ilp, uniform — see below)                                                                                                                                                                                              |
+| `neg_ilp_alpha_confidence`, `neg_ilp_alpha_bias`                                                           | `params.*` of the same name | Only used when `negative_sampling_method` is `ilp`; see [Bias-aware ILP negative sampling](#bias-aware-ilp-negative-sampling-optional) below. Highly dataset-specific, so overridable per row rather than fixed run-wide.                               |
+| `neg_ilp_lambda_degree`, `neg_ilp_lambda_taxon_pair`, `neg_ilp_lambda_self_loop`, `neg_ilp_lambda_jaccard` | `params.*` of the same name | Same as above.                                                                                                                                                                                                                                          |
 
 Everything else (solver settings, Gurobi license, resource limits, seeds,
 `neg_ilp_degree_bias_mode`, ...) stays a run-wide default in
@@ -226,6 +227,43 @@ once per dataset:
 Both are purely a compute/storage optimization — a dataset in a mixed run
 with others produces the same `train.csv`/`val.csv`/etc. it would if run
 alone.
+
+---
+
+## Best-practice short run (`--split_only`)
+
+For a quick, opinionated run that only produces the leakage-aware splits —
+without embedding/training a baseline classifier or building the bias/MultiQC
+report — skip straight to the ILP-based splitting core:
+
+```bash
+nextflow run main.nf --samplesheet samplesheet.csv --outdir results --split_only
+```
+
+`--split_only` runs only `SOLVE_ILP` → `CDHIT2D` → `REMOVE_REDUNDANT` →
+`SAMPLE_NEGATIVES_ILP`, then stops — `FETCH_DATA`, `CLUSTERING` (`RUN_BLAST`/
+`MAKE_METIS`/`RUN_KAHIP`), `TRAIN_BASELINE`, and `QC` never run. Because of
+that, every samplesheet row must supply all of the following (no fallback to
+fetching/computing them):
+
+| Column           | Precomputed file                                    |
+|------------------|------------------------------------------------------|
+| `ppis`           | PPI CSV                                               |
+| `sequences`      | `sequences.fasta`                                     |
+| `go_annotations` | `go_annotations.tsv`                                  |
+| `species`        | `species.tsv`                                         |
+| `partition`      | KaHIP's `partitioned_proteome.txt`                    |
+| `node_mapping`   | `node_mapping.tsv`                                    |
+
+`candidate_network` remains optional, same as a normal run. `split_method`
+and `negative_sampling_method` are forced to `ilp` regardless of what the
+samplesheet says, since that's the only path this mode runs. Everything else
+(`cdhit_identity`, `ilp_epsilon`, the `neg_ilp_*` weights, `--gurobi_license`/
+`--ilp_solver`/`--neg_ilp_solver`, ...) still applies exactly as in a full run
+— see [Bias-aware ILP negative sampling](#bias-aware-ilp-negative-sampling-optional)
+above for those. The output is the same four files a full run produces —
+`results/<id>/{train,val,test_balanced,test_realistic}.csv` — just without
+the classifier/bias/MultiQC steps built on top of them.
 
 ---
 
@@ -282,12 +320,17 @@ sampling at random. It matches per-protein per-taxon interaction counts,
 self-interaction counts, and mean GO-BP Jaccard similarity between the positive
 and negative sets, while preferring high-confidence non-interactions when a
 confidence score is supplied. `bin/sample_negatives_ilp.py` samples exactly one
-split per invocation; the process runs once per split (train, val,
-test_balanced, test_realistic) and Nextflow executes all four in parallel.
-Together they produce the same four output files (`train.csv`, `val.csv`,
-`test_balanced.csv`, `test_realistic.csv`) as the default sampler, so all
-downstream steps are unaffected. See `sample_negatives_SPEC.md` and
-`ppi_negative_sampling_ilp.tex` for the full mathematical derivation.
+split per invocation; the process runs once per split for train, val, and
+test_balanced, and Nextflow executes all three in parallel. `test_realistic`
+is deliberately excluded — same as under `negative_sampling_method=default`,
+it always gets uniform-at-random negatives (via `SAMPLE_NEGATIVES_DEGREE`)
+regardless of `negative_sampling_method`, since the point of that split is to
+simulate an uncontrolled random screen, and bias-matching its negatives to
+the positives would defeat that purpose. Together they produce the same four
+output files (`train.csv`, `val.csv`, `test_balanced.csv`,
+`test_realistic.csv`) as the default sampler, so all downstream steps are
+unaffected. See `sample_negatives_SPEC.md` and `ppi_negative_sampling_ilp.tex`
+for the full mathematical derivation.
 
 Enable it with:
 

@@ -1,0 +1,2 @@
+id,ppis,sequences,go_annotations,species,partition,node_mapping
+hippie,data/HIPPIE-current.csv,data/hippie_precomputed/sequences.fasta,data/hippie_precomputed/go_annotations.tsv,data/hippie_precomputed/species.tsv,data/hippie_precomputed/partitioned_proteome.txt,data/hippie_precomputed/node_mapping.tsv
