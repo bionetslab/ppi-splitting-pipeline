@@ -283,7 +283,7 @@ def build_candidate_set(n_proteins, pos_pairs, cfg: SamplingConfig, max_candidat
     (which would itself blow the memory budget --max-candidates guards
     against). See _subsample_candidate_pairs for how `cfg`, `taxon_codes` and
     `go_membership`/`go_sizes` shape that subsample."""
-    print(f"Number of unique proteins in the positive set: {len(pos_pairs)}")
+    print(f"Number of unique PPIs in the positive set: {len(pos_pairs)}")
     n_pairs_full = n_proteins * (n_proteins + 1) // 2
     n_est = n_pairs_full - len(pos_pairs)
     if n_est > max_candidates:
@@ -328,7 +328,7 @@ def _positive_same_species_fraction(pos_pairs, taxon_codes) -> float:
 
 
 def _fill_stratum(rng, n_proteins, exclude_keys, quota, taxon_codes=None, want_same=None,
-                   go_membership=None, go_sizes=None, max_rounds=200) -> np.ndarray:
+                   go_membership=None, go_sizes=None, weights=None, max_rounds=200) -> np.ndarray:
     """Draw up to `quota` unique (i, j) keys (i <= j, encoded as i*n_proteins+j)
     via repeated random batches, excluding `exclude_keys` (e.g. positives).
 
@@ -339,6 +339,16 @@ def _fill_stratum(rng, n_proteins, exclude_keys, quota, taxon_codes=None, want_s
     pairs with nonzero GO-BP Jaccard are always kept first (they're rare in
     a uniform draw but are what's needed to hit a nonzero target mean),
     with plain draws filling out the rest of the quota.
+
+    If `weights` is given (a length-n_proteins probability array), proteins
+    are drawn proportionally to it instead of uniformly -- pass each
+    protein's hard negative-degree cap (see _max_degree_cap) so that a
+    low-degree protein doesn't end up with as many candidate edges, on
+    average, as a high-degree one. Plain uniform sampling gives every
+    protein roughly the same number of candidates regardless of its cap,
+    which wastes almost all of a low-cap protein's share (any candidate
+    beyond its cap can never be selected) and can make the ILP infeasible
+    even when the candidate pool is nominally large enough.
 
     Returns fewer than `quota` keys (with a warning) if this stratum's true
     population turns out to be smaller, after `max_rounds` batches."""
@@ -353,8 +363,12 @@ def _fill_stratum(rng, n_proteins, exclude_keys, quota, taxon_codes=None, want_s
         if have >= quota:
             break
         batch_size = max(10_000, (quota - have) * 5)
-        i = rng.integers(0, n_proteins, size=batch_size, dtype=np.int64)
-        j = rng.integers(0, n_proteins, size=batch_size, dtype=np.int64)
+        if weights is None:
+            i = rng.integers(0, n_proteins, size=batch_size, dtype=np.int64)
+            j = rng.integers(0, n_proteins, size=batch_size, dtype=np.int64)
+        else:
+            i = rng.choice(n_proteins, size=batch_size, p=weights)
+            j = rng.choice(n_proteins, size=batch_size, p=weights)
         lo, hi = np.minimum(i, j), np.maximum(i, j)
         batch_keys = np.unique(lo * n_proteins + hi)
         if len(exclude_keys):
@@ -392,6 +406,18 @@ def _fill_stratum(rng, n_proteins, exclude_keys, quota, taxon_codes=None, want_s
     return np.union1d(priority_keys, filler_keys[:quota - len(priority_keys)])
 
 
+def _degree_weights(pos_pairs, n_proteins) -> np.ndarray:
+    """Per-protein sampling probability, proportional to each protein's hard
+    negative-degree cap (see _max_degree_cap) -- i.e. proportional to its
+    positive degree, since the cap is that degree times a fixed constant.
+
+    Every protein passed through build_protein_index appears in at least one
+    positive pair, so every weight is > 0; no zero-probability/divide-by-zero
+    case to guard against."""
+    d_plus = _degree_array(pos_pairs, n_proteins)
+    return d_plus / d_plus.sum()
+
+
 def _subsample_candidate_pairs(n_proteins, pos_pairs, n_target, cfg: SamplingConfig, seed=42,
                                 taxon_codes=None, go_membership=None, go_sizes=None) -> np.ndarray:
     """Randomly draw n_target unique (i, j) pairs with i <= j, excluding
@@ -409,8 +435,16 @@ def _subsample_candidate_pairs(n_proteins, pos_pairs, n_target, cfg: SamplingCon
     - If `go_membership`/`go_sizes` are given (--lambda-jaccard > 0),
       nonzero-Jaccard pairs encountered while filling each stratum (or the
       whole budget, if taxonomy isn't active) are always kept first.
+
+    Proteins are drawn proportionally to their own negative-degree cap (see
+    _degree_weights), not uniformly -- a uniform draw hands every protein
+    roughly the same number of candidates regardless of its cap, so a
+    low-degree (low-cap) protein ends up with mostly-unusable candidates
+    (anything past its cap can never be selected), which can make the ILP
+    infeasible even when the pool is nominally large enough overall.
     """
     rng = np.random.default_rng(seed)
+    weights = _degree_weights(pos_pairs, n_proteins)
     pos_keys = (
         np.sort(pos_pairs[:, 0].astype(np.int64) * n_proteins + pos_pairs[:, 1].astype(np.int64))
         if len(pos_pairs) else np.empty(0, dtype=np.int64)
@@ -427,17 +461,20 @@ def _subsample_candidate_pairs(n_proteins, pos_pairs, n_target, cfg: SamplingCon
         n_same = int(round(same_ratio * remaining))
         n_cross = remaining - n_same
         same_keys = _fill_stratum(rng, n_proteins, pos_keys, n_same, taxon_codes=taxon_codes,
-                                   want_same=True, go_membership=go_membership, go_sizes=go_sizes)
+                                   want_same=True, go_membership=go_membership, go_sizes=go_sizes,
+                                   weights=weights)
         cross_keys = _fill_stratum(rng, n_proteins, pos_keys, n_cross, taxon_codes=taxon_codes,
-                                    want_same=False, go_membership=go_membership, go_sizes=go_sizes)
+                                    want_same=False, go_membership=go_membership, go_sizes=go_sizes,
+                                    weights=weights)
         drawn_keys = np.union1d(same_keys, cross_keys)
         shortfall = remaining - len(drawn_keys)
         if shortfall > 0:
             exclude = np.union1d(pos_keys, np.union1d(self_keys, drawn_keys))
-            drawn_keys = np.union1d(drawn_keys, _fill_stratum(rng, n_proteins, exclude, shortfall))
+            drawn_keys = np.union1d(drawn_keys,
+                                     _fill_stratum(rng, n_proteins, exclude, shortfall, weights=weights))
     else:
         drawn_keys = _fill_stratum(rng, n_proteins, pos_keys, remaining,
-                                    go_membership=go_membership, go_sizes=go_sizes)
+                                    go_membership=go_membership, go_sizes=go_sizes, weights=weights)
 
     keys = np.union1d(self_keys, drawn_keys)
 

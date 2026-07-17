@@ -1,7 +1,6 @@
 %%metro title: PPI splitting pipeline
-%%metro line_order: definition
+%%metro center_ports: true
 %%metro diamond_style: symmetric
-%%metro compact_offsets: true
 %%metro font_scale: 1.5
 %%metro track_gap: 2
 %%metro mode: light
@@ -18,13 +17,22 @@
 %%metro grid: sample_negatives | 2,1
 %%metro grid: train_baseline | 3,2
 %%metro grid: qc | 2,3
+%%metro file: csv_in | CSV | | banner
+%%metro file: multiqc_out | HTML | | banner
 
 %% Link to edit: https://seqeralabs.github.io/nf-metro/latest/playground/#mmd-gz=H4sIAAAAAAAAE51YW0_rOBB-Pv0VI60iBYmiFlagrbQrHeDsghZWPZS3CEUmmaQWuWG7SBzx41dO2tSxXePAUzOe75vJ3DwhCEoUrAZBRYELWC5vgTcFFYJWOTS0wYJWOAm2WiklZV2lMRfvUpu_l1JOk15Basc1S5EtIMWMVlTQuhoe84YhSReQYCWQYdqfZnUlYp4QST0_OevlgpHkJc5Js4B5LyzrFBdQ0HwtetnOLXxFRgZGF9DUPH4ha9rEFeYxI1Val_ABy5qfdG-8gH_Jze3yGP7D_ARWpGwKWuUL6FV_u5il51nm5KVF40V6e7eUjFl2MSPnFkZaOPy8vXN5mWV_XFzMHJymjzbC3sP03MrWGTzs5EMrdEYzy9Lfe-ac0XQBKREkbhhKD2fHM-00KTZcIJOlKY_n2nFrOW5qTgV9Qw4fMDd1pCco3SY7pVNDSTBCq_iZ8Lb64QPOjk81ldekRZ5NJpOckWYNdw8TAAC-ee6e928SXRNBYMmweWpV5F-GIlnHUieM_pa_QSo9HfUKOYq4wCoXax5G_6CAu-7h6WhiIYHp9K8PW4V_qER-QFo03qhhmY6GjTFl1JuJxCqdDJOgFEy0oiUtCKPifSozm0JDmGjHE63yfWbYpoqfC8JFGD1sKri8-756VPJSkheMSxSUh9E9eUG4__F4u1IUJL4L5stZR9FOAAhf_jw7suvNZzNNcz6bHamZ7p1yJHrvmResjb0XRk_yKNAhM0FgYiwptiAtqXBERU2HH7L12Bemx2aYVR-kbk6FBYEFaImS4a3ZCfpsjFZSICd2J9g3AK-LN5RuhdFK_pQ3gVK3vGYibhpZ_6uaCbkxcPW4tdM5Fm6NdFeBopSkaypO0zC6up7eUDE9vVYbA8v6DWOG6aZKSSX7sJXAw06iKJtuOWpha9YL06ZlBzBjc7AATBuHEAMLxvsEgRpJV_IPUmwPXM2hhdoD2pWrL85oj7FAt7kg0HG25rChLQ2iLwZRu7SgXGCI0iLfdMU4xZwhhtFu4-mepw1DjuxN3j01g01Fs5qpTWDwDFsOsprBMyV8WtKKlvQXkVfVFm-6r60s0aN8hsvt8767sXzGNOb4usEqQR5GP6QAVjuB4mBHmRSEc5pRZOGW9KqXqFeURuyoOp13BEVbDqPxehV-meBr5i01aeUwk_qaQPTzap88WQ4xqUjxzuX8vaSEw_fto1pZ_aYTr5GIksi66mVw08nUeVwXBSYilvxhdNU9gaQfFES5KQR9TcLoXv74eQUP2NRMqFUw8NA1ihWL3uBuYvojjdk8HjrWpG0-29DW0LuWuy70vrBu6_LBGMvdGJC_Gdtqp-Ec5TsiMF5gq98O5GdB8oCONflJwPpZEQRwK_-NMuWYyAsCMM2xqzPl8-iTBbldwz0w_a7qBtiWYj-ExYDfp6C6LE221fRNXYsdEejXwBb4Caj1cIjoPmUMjKeX-pfgwSj2m6QPaOumiuhg2jLkCot9z_Gl6Tyw7DhuAuOtv-LFMAqHfAiCgwS23Dkc6W5tz339cyK7giNV2ubhxaIH-isclrfzolE_h7SKGY0f5NqG7ual93Y6uNedWD2C_kjtncebHAmz5MkEj54PxuU1srNH4vXR8kXzLrB3C5vw_wEwWhpLSBkAAA
 
 graph LR
     subgraph data_prep [Data Prep]
+    	csv_in[ ]
         fetch_data([Fetch Data])
         get_lengths([Get Lengths])
+
+        csv_in -->|pos_kahip_neg_random| fetch_data
+        csv_in -->|pos_kahip_neg_ilp| fetch_data
+        csv_in -->|pos_ilp_neg_random| fetch_data
+        csv_in -->|pos_ilp_neg_ilp| fetch_data
+        csv_in -->|pos_random_neg_random| fetch_data
 
         fetch_data -->|pos_kahip_neg_random| get_lengths
         fetch_data -->|pos_kahip_neg_ilp| get_lengths
@@ -97,6 +105,7 @@ graph LR
         similarity_heatmap([Similarity Heatmap])
         collect_bias([Collect Biases])
         multiqc([MultiQC Report])
+        multiqc_out[ ]
 
         bias_analysis -->|pos_kahip_neg_random| collect_bias
         bias_analysis -->|pos_kahip_neg_ilp| collect_bias
@@ -115,6 +124,13 @@ graph LR
         similarity_heatmap -->|pos_ilp_neg_random| multiqc
         similarity_heatmap -->|pos_ilp_neg_ilp| multiqc
         similarity_heatmap -->|pos_random_neg_random| multiqc
+
+        multiqc -->|pos_kahip_neg_random| multiqc_out
+        multiqc -->|pos_kahip_neg_ilp| multiqc_out
+        multiqc -->|pos_ilp_neg_random| multiqc_out
+        multiqc -->|pos_ilp_neg_ilp| multiqc_out
+        multiqc -->|pos_random_neg_random| multiqc_out
+
     end
 
     %% Inter-section edges
@@ -145,6 +161,7 @@ graph LR
     sample_negatives_degree -->|pos_random_neg_random| embed_sequences
     sample_negatives_ilp -->|pos_kahip_neg_ilp| embed_sequences
     sample_negatives_ilp -->|pos_ilp_neg_ilp| embed_sequences
+
 
     embed_sequences -->|pos_kahip_neg_random| bias_analysis
     embed_sequences -->|pos_ilp_neg_random| bias_analysis
