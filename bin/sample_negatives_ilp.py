@@ -234,11 +234,18 @@ def load_candidate_network(path, protein_to_idx, pos_pairs_set, cfg: SamplingCon
     Returns (candidates (n,2) int64 sorted array, confidence_override dict or
     None). Restricts to the given protein universe and excludes positives.
 
-    If --lambda-self-loop > 0, every (i, i) self-pair not already a positive
-    self-interaction is added to the pool even if absent from the file, so
+    The file-derived pairs are then run through _subsample_candidate_pairs
+    (via its given_pairs parameter) exactly like the auto-generated pool is:
+    if there are more than --max-candidates, they're subsampled down --
+    weighted by each protein's own negative-degree cap, not a plain uniform
+    row sample, for the same reason the auto-generated pool is (a flat
+    sample gives every protein roughly the same representation regardless of
+    its cap, which can make the ILP infeasible even when the pool is
+    nominally large enough). If the file has fewer pairs than
+    --max-candidates, all of them are kept. Either way, --lambda-self-loop
+    > 0 self-pairs are forced in on top by that same function, so
     self-interactions are always candidates regardless of what the supplied
-    network happens to cover. Skipped entirely when the self-loop bias isn't
-    requested, since there's then no reason to force them in.
+    network happens to cover.
     """
     pairs = set()
     weights = {}
@@ -257,15 +264,30 @@ def load_candidate_network(path, protein_to_idx, pos_pairs_set, cfg: SamplingCon
             if has_w and row.get("w"):
                 weights[(i, j)] = float(row["w"])
 
-    if cfg.lambda_self_loop > 0:
-        pos_self = {i for i, j in pos_pairs_set if i == j}
-        for i in range(len(protein_to_idx)):
-            if i not in pos_self:
-                pairs.add((i, i))
+    network_pairs = np.array(sorted(pairs), dtype=np.int64) if pairs else np.zeros((0, 2), dtype=np.int64)
 
-    if not pairs:
-        return np.zeros((0, 2), dtype=np.int64), (weights or None)
-    return np.array(sorted(pairs), dtype=np.int64), (weights or None)
+    if len(network_pairs) > cfg.max_candidates:
+        logging.warning(
+            "--candidate-network has %s pairs, exceeding --max-candidates=%s; "
+            "subsampling %s pairs from it (weighted toward each protein's own "
+            "negative-degree cap, not uniformly).",
+            f"{len(network_pairs):,}", f"{cfg.max_candidates:,}", f"{cfg.max_candidates:,}",
+        )
+
+    n_proteins = len(protein_to_idx)
+    pos_pairs_arr = (
+        np.array(sorted(pos_pairs_set), dtype=np.int64)
+        if pos_pairs_set else np.zeros((0, 2), dtype=np.int64)
+    )
+    candidates = _subsample_candidate_pairs(
+        n_proteins, pos_pairs_arr, cfg.max_candidates, cfg, seed=cfg.seed, given_pairs=network_pairs,
+    )
+
+    if weights:
+        kept = {tuple(row) for row in candidates.tolist()}
+        weights = {k: v for k, v in weights.items() if k in kept}
+
+    return candidates, (weights or None)
 
 
 # ============================================================
@@ -327,8 +349,63 @@ def _positive_same_species_fraction(pos_pairs, taxon_codes) -> float:
     return float(np.mean(taxon_codes[i_arr] == taxon_codes[j_arr]))
 
 
+def _filter_same_species(keys, bi, bj, taxon_codes, want_same):
+    """Restrict (keys, bi, bj) to same-species (want_same=True) or
+    cross-species (want_same=False) pairs per taxon_codes; shared by
+    _fill_stratum and _fill_stratum_from_pool."""
+    same_mask = taxon_codes[bi] == taxon_codes[bj]
+    keep_mask = same_mask if want_same else ~same_mask
+    return keys[keep_mask], bi[keep_mask], bj[keep_mask]
+
+
+def _fill_stratum_from_pool(pool_keys, n_proteins, exclude_keys, quota, rng,
+                             taxon_codes=None, want_same=None,
+                             go_membership=None, go_sizes=None, weights=None) -> np.ndarray:
+    """Like _fill_stratum, but the eligible population is already fully known
+    (`pool_keys`, e.g. a user-supplied --candidate-network) instead of the
+    whole n_proteins**2 space -- so instead of _fill_stratum's
+    generate-random-batches-and-reject loop (which would rarely hit a
+    pool that's sparse relative to n_proteins**2), this filters `pool_keys`
+    directly and draws a single weighted sample without replacement."""
+    keys = pool_keys
+    if len(exclude_keys):
+        keys = keys[~np.isin(keys, exclude_keys, assume_unique=True)]
+    if len(keys) == 0:
+        return np.empty(0, dtype=np.int64)
+
+    bi, bj = keys // n_proteins, keys % n_proteins
+    if want_same is not None:
+        keys, bi, bj = _filter_same_species(keys, bi, bj, taxon_codes, want_same)
+    if len(keys) == 0:
+        return np.empty(0, dtype=np.int64)
+
+    def _weighted_sample(idx, n):
+        """idx: positions into keys/bi/bj to draw up to n (<= len(idx)) from."""
+        if len(idx) <= n:
+            return idx
+        if weights is None:
+            return rng.choice(idx, size=n, replace=False)
+        w = weights[bi[idx]] + weights[bj[idx]]
+        return rng.choice(idx, size=n, replace=False, p=w / w.sum())
+
+    all_idx = np.arange(len(keys))
+    if go_membership is not None:
+        jac = _pairwise_jaccard(np.stack([bi, bj], axis=1), go_membership, go_sizes)
+        priority_idx, filler_idx = all_idx[jac > 0], all_idx[jac == 0]
+    else:
+        priority_idx, filler_idx = np.empty(0, dtype=np.int64), all_idx
+
+    if len(priority_idx) >= quota:
+        chosen = _weighted_sample(priority_idx, quota)
+    else:
+        chosen = np.concatenate([priority_idx, _weighted_sample(filler_idx, quota - len(priority_idx))])
+
+    return np.sort(keys[chosen])
+
+
 def _fill_stratum(rng, n_proteins, exclude_keys, quota, taxon_codes=None, want_same=None,
-                   go_membership=None, go_sizes=None, weights=None, max_rounds=200) -> np.ndarray:
+                   go_membership=None, go_sizes=None, weights=None, pool_keys=None,
+                   max_rounds=200) -> np.ndarray:
     """Draw up to `quota` unique (i, j) keys (i <= j, encoded as i*n_proteins+j)
     via repeated random batches, excluding `exclude_keys` (e.g. positives).
 
@@ -350,10 +427,22 @@ def _fill_stratum(rng, n_proteins, exclude_keys, quota, taxon_codes=None, want_s
     beyond its cap can never be selected) and can make the ILP infeasible
     even when the candidate pool is nominally large enough.
 
+    If `pool_keys` is given (a sorted array of i*n_proteins+j keys, e.g. from
+    a user-supplied --candidate-network), sampling is restricted to that
+    fixed, already-known pool via _fill_stratum_from_pool instead of the
+    generate-and-reject loop below, which would be far too inefficient for a
+    pool that's sparse relative to n_proteins**2.
+
     Returns fewer than `quota` keys (with a warning) if this stratum's true
     population turns out to be smaller, after `max_rounds` batches."""
     if quota <= 0:
         return np.empty(0, dtype=np.int64)
+
+    if pool_keys is not None:
+        return _fill_stratum_from_pool(pool_keys, n_proteins, exclude_keys, quota, rng,
+                                        taxon_codes=taxon_codes, want_same=want_same,
+                                        go_membership=go_membership, go_sizes=go_sizes,
+                                        weights=weights)
 
     priority_keys = np.empty(0, dtype=np.int64)
     filler_keys = np.empty(0, dtype=np.int64)
@@ -381,9 +470,7 @@ def _fill_stratum(rng, n_proteins, exclude_keys, quota, taxon_codes=None, want_s
 
         bi, bj = batch_keys // n_proteins, batch_keys % n_proteins
         if want_same is not None:
-            same_mask = taxon_codes[bi] == taxon_codes[bj]
-            keep_mask = same_mask if want_same else ~same_mask
-            batch_keys, bi, bj = batch_keys[keep_mask], bi[keep_mask], bj[keep_mask]
+            batch_keys, bi, bj = _filter_same_species(batch_keys, bi, bj, taxon_codes, want_same)
         if len(batch_keys) == 0:
             continue
 
@@ -419,15 +506,26 @@ def _degree_weights(pos_pairs, n_proteins) -> np.ndarray:
 
 
 def _subsample_candidate_pairs(n_proteins, pos_pairs, n_target, cfg: SamplingConfig, seed=42,
-                                taxon_codes=None, go_membership=None, go_sizes=None) -> np.ndarray:
+                                taxon_codes=None, go_membership=None, go_sizes=None,
+                                given_pairs=None) -> np.ndarray:
     """Randomly draw n_target unique (i, j) pairs with i <= j, excluding
     positives, without ever materializing the full upper-triangle. Used when
     the full complement is too large to enumerate directly.
 
+    If `given_pairs` is supplied (an (n, 2) array, e.g. a user-supplied
+    --candidate-network), sampling is restricted to that fixed pool instead
+    of generating fresh random pairs over the whole n_proteins**2 space --
+    see _fill_stratum's pool_keys parameter. If `given_pairs` has no more
+    than n_target rows to begin with, all of it is kept (no subsampling
+    needed).
+
     Sampling is informed by whichever biases are actually active:
     - If --lambda-self-loop > 0, every non-positive self-pair (i, i) is
-      always kept first, even past n_target if necessary. Skipped entirely
-      otherwise, since there's then no reason to force them in.
+      always kept first, even past n_target if necessary -- regardless of
+      whether it's present in `given_pairs`, so self-interactions are always
+      candidates even if a supplied network doesn't happen to cover them.
+      Skipped entirely otherwise, since there's then no reason to force
+      them in.
     - If `taxon_codes` is given (a taxonomy-relevant bias is active), the
       remaining budget is stratified into same-/cross-species portions
       matching the ratio observed in the positive set, instead of one
@@ -436,12 +534,13 @@ def _subsample_candidate_pairs(n_proteins, pos_pairs, n_target, cfg: SamplingCon
       nonzero-Jaccard pairs encountered while filling each stratum (or the
       whole budget, if taxonomy isn't active) are always kept first.
 
-    Proteins are drawn proportionally to their own negative-degree cap (see
-    _degree_weights), not uniformly -- a uniform draw hands every protein
-    roughly the same number of candidates regardless of its cap, so a
-    low-degree (low-cap) protein ends up with mostly-unusable candidates
-    (anything past its cap can never be selected), which can make the ILP
-    infeasible even when the pool is nominally large enough overall.
+    Proteins are drawn (or, with `given_pairs`, pairs are weighted)
+    proportionally to their own negative-degree cap (see _degree_weights),
+    not uniformly -- a uniform draw/sample hands every protein roughly the
+    same number of candidates regardless of its cap, so a low-degree
+    (low-cap) protein ends up with mostly-unusable candidates (anything past
+    its cap can never be selected), which can make the ILP infeasible even
+    when the pool is nominally large enough overall.
     """
     rng = np.random.default_rng(seed)
     weights = _degree_weights(pos_pairs, n_proteins)
@@ -449,6 +548,13 @@ def _subsample_candidate_pairs(n_proteins, pos_pairs, n_target, cfg: SamplingCon
         np.sort(pos_pairs[:, 0].astype(np.int64) * n_proteins + pos_pairs[:, 1].astype(np.int64))
         if len(pos_pairs) else np.empty(0, dtype=np.int64)
     )
+
+    pool_keys = None
+    if given_pairs is not None:
+        pool_keys = (
+            np.sort(given_pairs[:, 0].astype(np.int64) * n_proteins + given_pairs[:, 1].astype(np.int64))
+            if len(given_pairs) else np.empty(0, dtype=np.int64)
+        )
 
     self_keys = np.empty(0, dtype=np.int64)
     if cfg.lambda_self_loop > 0:
@@ -462,19 +568,21 @@ def _subsample_candidate_pairs(n_proteins, pos_pairs, n_target, cfg: SamplingCon
         n_cross = remaining - n_same
         same_keys = _fill_stratum(rng, n_proteins, pos_keys, n_same, taxon_codes=taxon_codes,
                                    want_same=True, go_membership=go_membership, go_sizes=go_sizes,
-                                   weights=weights)
+                                   weights=weights, pool_keys=pool_keys)
         cross_keys = _fill_stratum(rng, n_proteins, pos_keys, n_cross, taxon_codes=taxon_codes,
                                     want_same=False, go_membership=go_membership, go_sizes=go_sizes,
-                                    weights=weights)
+                                    weights=weights, pool_keys=pool_keys)
         drawn_keys = np.union1d(same_keys, cross_keys)
         shortfall = remaining - len(drawn_keys)
         if shortfall > 0:
             exclude = np.union1d(pos_keys, np.union1d(self_keys, drawn_keys))
             drawn_keys = np.union1d(drawn_keys,
-                                     _fill_stratum(rng, n_proteins, exclude, shortfall, weights=weights))
+                                     _fill_stratum(rng, n_proteins, exclude, shortfall, weights=weights,
+                                                   pool_keys=pool_keys))
     else:
         drawn_keys = _fill_stratum(rng, n_proteins, pos_keys, remaining,
-                                    go_membership=go_membership, go_sizes=go_sizes, weights=weights)
+                                    go_membership=go_membership, go_sizes=go_sizes, weights=weights,
+                                    pool_keys=pool_keys)
 
     keys = np.union1d(self_keys, drawn_keys)
 

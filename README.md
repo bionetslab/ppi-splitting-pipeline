@@ -330,8 +330,14 @@ by `environment.yml`.
 
 The default candidate pool is the full upper-triangle complement of the
 positive set, which is quadratic in the number of proteins (~1.1×10⁸ pairs for
-15k proteins). For large datasets, supply `--candidate_network` to restrict
-the pool, or the script will raise a clear error before attempting to build it.
+15k proteins). If it exceeds `max_candidates`, the pool is randomly subsampled
+instead of built in full — weighted toward each protein's own negative-degree
+cap rather than uniformly, so a low-degree protein doesn't end up with far
+more candidates than it can ever use. For large datasets, supply
+`--candidate_network` to restrict the pool to a deliberately-curated set
+instead (e.g. a Negatome database or a topology-driven pool); if that network
+is itself larger than `max_candidates`, it's capped down the same
+degree-weighted way rather than used in full.
 
 Each split's process writes its own `<split>_mqc.tsv` diagnostics row and,
 optionally, `<split>_residuals_mqc.tsv` (per-protein degree residuals); MultiQC
