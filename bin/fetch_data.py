@@ -140,8 +140,8 @@ def _fetch_page(url, retries=3):
     raise RuntimeError(f"fetch_page called with retries={retries} <= 0")
 
 
-def fetch_batch(accessions, retries=3):
-    """Batch request returning accession, sequence, GO IDs, and taxon ID as TSV.
+def fetch_batch(accessions, retries=3, include_sequence=True):
+    """Batch request returning accession, [sequence], GO IDs, and taxon ID as TSV.
 
     accessions should be canonical (no isoform suffix) to ensure UniProt matches them.
     Uses UniProt's paginated /uniprotkb/search endpoint (per their guidance for
@@ -150,12 +150,19 @@ def fetch_batch(accessions, retries=3):
     set and is more prone to being cut off by transient server-side errors.
     Follows the `Link: rel="next"` cursor until UniProt reports no more pages
     (in practice always one page here, since BATCH_SIZE <= SEARCH_PAGE_SIZE).
+
+    Pass include_sequence=False to skip the "sequence" field for callers that
+    already have sequences from elsewhere and only want taxonomy/GO -- pair
+    with parse_batch(text, include_sequence=False).
     """
+    fields = "accession,go_p,go_f,go_c,organism_id"
+    if include_sequence:
+        fields = "accession,sequence,go_p,go_f,go_c,organism_id"
     query = " OR ".join(f"accession:{acc}" for acc in accessions)
     params = urllib.parse.urlencode({
         "query": query,
         "format": "tsv",
-        "fields": "accession,sequence,go_p,go_f,go_c,organism_id",
+        "fields": fields,
         "size": SEARCH_PAGE_SIZE,
     })
     url = f"{UNIPROT_URL}?{params}"
@@ -211,24 +218,55 @@ def _parse_go(raw):
     return {t.strip() for t in raw.split(";") if t.strip()}
 
 
-def parse_batch(text):
-    """Return ({accession: sequence}, {accession: {BP/MF/CC: set}}, {accession: taxon_id})."""
+def parse_batch(text, include_sequence=True):
+    """Return ({accession: sequence}, {accession: {BP/MF/CC: set}}, {accession: taxon_id}).
+
+    The sequence dict is empty when include_sequence=False, matching the
+    columns fetch_batch(..., include_sequence=False) actually requested.
+    """
+    go_col = 2 if include_sequence else 1
     seqs, go, species = {}, {}, {}
     lines = text.splitlines()
     for line in lines[1:]:  # skip header row
         parts = line.split("\t")
-        if len(parts) < 5:
+        if len(parts) < go_col + 3:
             continue
         acc = parts[0].strip()
         if acc:
-            seqs[acc] = parts[1].strip()
+            if include_sequence:
+                seqs[acc] = parts[1].strip()
             go[acc] = {
-                "BP": _parse_go(parts[2]),
-                "MF": _parse_go(parts[3]),
-                "CC": _parse_go(parts[4]),
+                "BP": _parse_go(parts[go_col]),
+                "MF": _parse_go(parts[go_col + 1]),
+                "CC": _parse_go(parts[go_col + 2]),
             }
-            species[acc] = parts[5].strip() if len(parts) > 5 else ""
+            species_col = go_col + 3
+            species[acc] = parts[species_col].strip() if len(parts) > species_col else ""
     return seqs, go, species
+
+
+def write_species_tsv(path, protein_ids, species):
+    """Write a protein_id/taxon_id TSV, in protein_ids order."""
+    with open(path, "w", newline="") as fh:
+        writer = csv.writer(fh, delimiter="\t")
+        writer.writerow(["protein_id", "taxon_id"])
+        for acc in protein_ids:
+            writer.writerow([acc, species.get(acc, "")])
+
+
+def write_go_tsv(path, protein_ids, go):
+    """Write a protein_id/go_bp/go_mf/go_cc TSV, in protein_ids order."""
+    with open(path, "w", newline="") as fh:
+        writer = csv.writer(fh, delimiter="\t")
+        writer.writerow(["protein_id", "go_bp", "go_mf", "go_cc"])
+        for acc in protein_ids:
+            cats = go.get(acc, {"BP": set(), "MF": set(), "CC": set()})
+            writer.writerow([
+                acc,
+                ";".join(sorted(cats.get("BP", set()))),
+                ";".join(sorted(cats.get("MF", set()))),
+                ";".join(sorted(cats.get("CC", set()))),
+            ])
 
 
 def main():
@@ -324,23 +362,8 @@ def main():
             if acc in all_seqs:
                 fh.write(f">{acc}\n{all_seqs[acc]}\n")
 
-    with open(go_out, "w", newline="") as fh:
-        writer = csv.writer(fh, delimiter="\t")
-        writer.writerow(["protein_id", "go_bp", "go_mf", "go_cc"])
-        for acc in proteins:
-            cats = all_go.get(acc, {"BP": set(), "MF": set(), "CC": set()})
-            writer.writerow([
-                acc,
-                ";".join(sorted(cats.get("BP", set()))),
-                ";".join(sorted(cats.get("MF", set()))),
-                ";".join(sorted(cats.get("CC", set()))),
-            ])
-
-    with open(species_out, "w", newline="") as fh:
-        writer = csv.writer(fh, delimiter="\t")
-        writer.writerow(["protein_id", "taxon_id"])
-        for acc in proteins:
-            writer.writerow([acc, all_species.get(acc, "")])
+    write_go_tsv(go_out, proteins, all_go)
+    write_species_tsv(species_out, proteins, all_species)
 
     print(f"Written {len(all_seqs)} sequences to {fasta_out}", file=sys.stderr)
     print(f"Written GO annotations for {len(proteins)} proteins to {go_out}", file=sys.stderr)

@@ -1,0 +1,9 @@
+id,ppis,embedding_model,split_method,ilp_kahip_k,ilp_max_sec,neg_ilp_time_limit,negative_sampling_method,neg_ilp_alpha_confidence,neg_ilp_alpha_bias,neg_ilp_lambda_degree,neg_ilp_lambda_taxon_pair,neg_ilp_lambda_self_loop,neg_ilp_lambda_jaccard,sequences,go_annotations,species
+Pinder-regular,data/pinder.csv,esm2,,,7200,7200,,,,,,,,data/pinder_sequences.fasta,data/pinder_go_annotations.tsv,data/pinder_species.tsv
+Pinder-ILP-split,data/pinder.csv,esm2,ilp,100,7200,7200,,,,,,,,data/pinder_sequences.fasta,data/pinder_go_annotations.tsv,data/pinder_species.tsv
+Pinder-ILP-split-and-sampling,data/pinder.csv,esm2,ilp,100,7200,7200,ilp,0.0,1.0,1,1,1,1,data/pinder_sequences.fasta,data/pinder_go_annotations.tsv,data/pinder_species.tsv
+Pinder-Leakage-split,data/pinder.csv,esm2,random,,7200,7200,uniform,,,,,,,data/pinder_sequences.fasta,data/pinder_go_annotations.tsv,data/pinder_species.tsv
+PDB_dimers-regular,data/pdb_interactions.csv,esm2,,,7200,7200,,,,,,,,data/pdb_dimers_sequences.fasta,data/pdb_dimers_go_annotations.tsv,data/pdb_dimers_species.tsv
+PDB_dimers-ILP-split,data/pdb_interactions.csv,esm2,ilp,100,7200,7200,,,,,,,,data/pdb_dimers_sequences.fasta,data/pdb_dimers_go_annotations.tsv,data/pdb_dimers_species.tsv
+PDB_dimers-ILP-split-and-sampling,data/pdb_interactions.csv,esm2,ilp,100,7200,7200,ilp,0.0,1.0,1,1,1,1,data/pdb_dimers_sequences.fasta,data/pdb_dimers_go_annotations.tsv,data/pdb_dimers_species.tsv
+PDB_dimers-Leakage-split,data/pdb_interactions.csv,esm2,random,,7200,7200,uniform,,,,,,,data/pdb_dimers_sequences.fasta,data/pdb_dimers_go_annotations.tsv,data/pdb_dimers_species.tsv
