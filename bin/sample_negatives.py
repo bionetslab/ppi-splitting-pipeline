@@ -91,9 +91,8 @@ def write_combined(pos_rows, negatives, path):
 
 
 def write_mqc(split_name, n_positives, n_negatives, gs_out, bar_out, id_):
-    # Sharing the same 'id' across all datasets' files lets MultiQC merge
-    # them into one combined general-stats table / bar plot; Sample is
-    # qualified by dataset so rows/categories don't collide across datasets.
+    # Same 'id' across datasets lets MultiQC merge them into one table/plot;
+    # Sample is dataset-qualified so rows don't collide across datasets.
     sample = mqc_sample(id_, split_name)
     with open(gs_out, "w") as fh:
         fh.write(

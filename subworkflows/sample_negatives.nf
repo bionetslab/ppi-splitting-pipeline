@@ -1,5 +1,3 @@
-// Aliased because the "random" sampler process is itself named SAMPLE_NEGATIVES,
-// which would otherwise collide with this subworkflow's own name.
 include { SAMPLE_NEGATIVES_DEGREE; SAMPLE_NEGATIVES_ILP } from '../processes/negative_sampling'
 
 // Samples negative PPIs for each split, using the degree-preserving
@@ -23,19 +21,14 @@ workflow SAMPLE_NEGATIVES {
         .mix(test_ppis.map { meta, f -> tuple(meta, "test_realistic", f, 10.0) })
 
     branched = splits_ch.branch { meta, label, f, ratio ->
-        // test_realistic is excluded here even when negative_sampling_method
-        // is "ilp" -- it falls through to the "default" branch below, whose
-        // mapping already forces uniform negatives for that label. The
-        // realistic test set is meant to simulate an uncontrolled random
-        // screen, not one bias-matched to the positives, so the bias-aware
-        // ILP sampler would defeat its purpose.
+        // test_realistic always falls through to "default" (uniform), even
+        // under "ilp" -- it simulates an uncontrolled random screen, so
+        // bias-matching it would defeat the point.
         ilp:     meta.negative_sampling_method == "ilp" && label != "test_realistic"
-        // Deliberately naive baseline: uniform-at-random negatives for
-        // every split (not just test_realistic), paired with
-        // split_method=random -- see processes/splitting.nf's
-        // SPLIT_RANDOM and bin/bias_analysis.py's topology_shortcut
-        // attribute for why this combination showcases the degree
-        // shortcut instead of avoiding it.
+        // Deliberately naive baseline: uniform negatives for every split,
+        // paired with split_method=random, to showcase the degree shortcut
+        // instead of avoiding it -- see bin/bias_analysis.py's
+        // topology_shortcut attribute.
         uniform: meta.negative_sampling_method == "uniform"
         default: true
     }

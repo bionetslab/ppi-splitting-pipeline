@@ -110,9 +110,8 @@ def _fetch_page(url, retries=3):
                 next_url = _next_page_url(resp.headers.get("Link"))
         except urllib.error.HTTPError as exc:
             if exc.code == 400:
-                # UniProt rejects the entire OR-joined query if any accession in
-                # it isn't valid UniProtKB format (e.g. a UniParc-only ID like a
-                # raw EMBL/GenBank protein_id). Retrying won't help.
+                # UniProt rejects the whole OR-joined query if one accession is
+                # non-UniProtKB format (e.g. a UniParc/EMBL id). Retrying won't help.
                 raise InvalidAccessionBatch(str(exc)) from exc
             if attempt < retries - 1:
                 time.sleep(2 ** attempt)

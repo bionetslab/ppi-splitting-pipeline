@@ -1,12 +1,8 @@
-// Datasets that request the same embedding_model share one embedding call
-// over the union of their train/val/test sequences (ESM2/ProtT5 embedding
-// is the most expensive per-protein step, so this avoids recomputing it for
-// proteins that appear in more than one dataset). fasta_files is the flat
-// list of every dataset-in-the-group's train/val/test fasta; stageAs
-// auto-numbers them since every dataset's split fasta is literally named
-// train_nr.fasta/val_nr.fasta/test_nr.fasta and would otherwise collide
-// when staged together. embed_sequences.py already merges/dedupes across
-// however many fasta files it's given.
+// Datasets requesting the same embedding_model share one embedding call over
+// the union of their train/val/test sequences, avoiding recomputation for
+// proteins in more than one dataset. stageAs auto-numbers fasta_files since
+// every dataset's split fasta shares the same name (train_nr.fasta, etc.)
+// and would otherwise collide; embed_sequences.py merges/dedupes them.
 process EMBED_SEQUENCES {
     publishDir(path: { "${params.outdir}/_shared/embeddings" }, mode: 'copy', saveAs: { f -> "embeddings_${embedding_model}.npz" })
     tag "embed_${embedding_model}"

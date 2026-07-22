@@ -35,9 +35,7 @@ process GET_LENGTHS {
 }
 
 // Splits the shared FETCH_DATA/GET_LENGTHS batch back out per dataset, so
-// downstream steps -- especially BLAST, whose background/E-value
-// statistics depend on exactly which proteins are in its search database
-// -- still see only this dataset's own proteins.
+// downstream steps (e.g. BLAST) see only this dataset's own proteins.
 process SUBSET_FETCHED_DATA {
     publishDir(path: { "${params.outdir}/${meta.id}/data" }, mode: 'copy', saveAs: { f -> f == 'lengths.tsv' ? null : f })
     tag "${meta.id}"

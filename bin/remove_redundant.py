@@ -118,11 +118,9 @@ def main():
     ]:
         print(f"{name}: {len(ppis)} PPIs, {len(prot)} proteins", file=sys.stderr)
 
-    # kahip/ilp assign every PPI to exactly one split (or discard it), so the
-    # pre-CD-HIT train/val/test files this script received already contain
-    # every non-discarded PPI -- comparing their total against the original
-    # input gives the KaHIP/ILP discard count without needing that number
-    # threaded in from SORT_PPIS/SOLVE_ILP.
+    # kahip/ilp assign every PPI to one split or discard it, so comparing input
+    # total to the pre-CD-HIT split totals gives the discard count directly,
+    # without threading it in from SORT_PPIS/SOLVE_ILP.
     n_ppis_discarded = n_input - (len(train_ppis) + len(val_ppis) + len(test_ppis))
 
     write_mqc([

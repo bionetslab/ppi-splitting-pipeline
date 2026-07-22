@@ -64,12 +64,10 @@ process SIMILARITY_HEATMAP {
     """
 }
 
-// One combined report for the whole run. stageAs: "?/*" stages every
+// One combined report for the whole run. stageAs: "?/*" stages each
 // dataset's contributions into its own numbered subdirectory, since
-// different datasets independently write same-named files (e.g. every
-// dataset has its own classifier_metrics_mqc.tsv) that would otherwise
-// collide in one task's work directory -- MultiQC scans subdirectories
-// recursively, so this is transparent to it.
+// same-named files (e.g. classifier_metrics_mqc.tsv) would otherwise
+// collide -- MultiQC scans subdirectories recursively, so this is transparent.
 process MULTIQC {
     publishDir(path: { "${params.outdir}/multiqc" }, mode: 'copy')
     tag "multiqc"

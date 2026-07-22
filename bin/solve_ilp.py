@@ -94,9 +94,8 @@ def solve_ilp(clusters_list, intra_ppi, cross_ppi, splits, names, epsilon, max_s
     # Constraint 1: every cluster is in exactly one split.
     constraints = [cp.sum(x, axis=0) == np.ones(n_clusters)]
 
-    # Helper constraint; constraint 2 to linearize x[s,i]·x[s,j] (both clusters in same split):
-    # introduce z[s,k] ∈ {0,1} for each pair k=(i,j) with k(c_i,c_j) > 0
-    # z[s,k] ≤ x[s,i],  z[s,k] ≤ x[s,j],  z[s,k] ≥ x[s,i] + x[s,j] − 1
+    # Constraint 2, linearizing x[s,i]·x[s,j] (both clusters in same split): for each pair
+    # k=(i,j) with k(c_i,c_j) > 0, z[s,k] ≤ x[s,i], z[s,k] ≤ x[s,j], z[s,k] ≥ x[s,i]+x[s,j]−1
     loss_pairs = [
         (i, j)
         for i in range(n_clusters)
@@ -131,10 +130,9 @@ def solve_ilp(clusters_list, intra_ppi, cross_ppi, splits, names, epsilon, max_s
             ppi_in_s = ppi_in_s + cross_counts @ z[s]
         constraints.append((1.0 - epsilon) * frac * total_assigned <= ppi_in_s)
 
-    # Objective: minimize discarded cross-cluster PPIs.
-    # Since each cluster is in exactly one split (constraint 1),
-    # cp.max(x[s,i] − x[s,j]) over s = 1 iff i and j are in different splits, 0 otherwise,
-    # which equals (1 − Σ_s x[s,i]·x[s,j]) from the docstring.
+    # Objective: minimize discarded cross-cluster PPIs. Since each cluster is in exactly
+    # one split (constraint 1), cp.max(x[s,i] − x[s,j]) over s = 1 iff i,j differ in split
+    # (0 otherwise) -- equivalent to (1 − Σ_s x[s,i]·x[s,j]) from the docstring.
     if loss_pairs:
         dl_terms = [
             cross_ppi[i, j] * cp.max(cp.vstack([x[s, i] - x[s, j] for s in range(n_splits)]))

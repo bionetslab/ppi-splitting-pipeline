@@ -319,9 +319,8 @@ leaves them blank.
 | `neg_ilp_mip_gap`                                 | `0.01`        | Solver MIP gap tolerance                                                                                                                                                     |
 | `gurobi_license`                                  | `null`        | Path to a Gurobi license file, only used if the `gurobi` solver is selected                                                                                                  |
 
-The active `--neg_ilp_lambda_*` weights (for the chosen `degree_bias_mode`) must
-sum to 1; a mismatch is auto-rescaled with a warning unless the script is run
-with `--strict-weights` directly (not exposed as a pipeline parameter).
+The active `--neg_ilp_lambda_*` weights (for the chosen `degree_bias_mode`)
+are recommended to sum to 1, but this is not enforced by the script.
 
 For Gurobi, install it yourself and point `--gurobi_license` at your license
 file (`pip install gurobipy` is already pulled in by `environment.yml`). With

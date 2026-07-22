@@ -1,9 +1,8 @@
 include { BIAS_ANALYSIS; COLLECT_BIAS; SIMILARITY_HEATMAP; MULTIQC } from '../processes/qc'
 
-// Some mqc-emitting processes emit a glob (e.g. "*_mqc.tsv") that can match
-// more than one file per task, which Nextflow packs into a List for that
-// tuple slot -- flatten those out to one (id, file) pair per file so
-// groupTuple() below doesn't end up nesting a List inside the grouped list.
+// Some mqc-emitting processes glob-match more than one file per task, which
+// Nextflow packs into a List -- flatten to one (id, file) pair per file so
+// groupTuple() below doesn't nest a List inside the grouped list.
 def flattenMqc(ch) {
     ch.flatMap { meta, f ->
         def files = (f instanceof List) ? f : [f]
@@ -34,10 +33,8 @@ workflow QC {
 
     main:
     // Whether to include "same_species" depends on each dataset's own
-    // species.tsv, not the run as a whole, so this is computed per-dataset
-    // (synchronously, via Path.splitCsv() inside the closure) rather than
-    // with a channel-wide collect() like a single-dataset run could get
-    // away with.
+    // species.tsv, so it's computed per-dataset here rather than with a
+    // single run-wide collect().
     attrs_ch = species_ch.map { meta, sp ->
         def taxa = sp.splitCsv(header: true, sep: '\t').collect { it.taxon_id }.unique()
         def attrs = ["sequence_similarity", "embedding_similarity",

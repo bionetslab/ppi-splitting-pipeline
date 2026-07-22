@@ -1,10 +1,8 @@
 include { SORT_PPIS; SOLVE_ILP; SPLIT_RANDOM; CDHIT2D; REMOVE_REDUNDANT } from '../processes/splitting'
 
-// Assigns PPIs to train/val/test (via KaHIP-based sorting, the ILP
-// splitter, or a naive random shuffle -- chosen per-dataset via
-// meta.split_method), then removes cross-split redundancy with CD-HIT-2D
-// for the two leakage-aware methods. The "random" method deliberately
-// skips CD-HIT -- see SPLIT_RANDOM for why.
+// Assigns PPIs to train/val/test (KaHIP, ILP, or random shuffle, per
+// meta.split_method), then runs CD-HIT-2D redundancy removal for the two
+// leakage-aware methods. "random" skips CD-HIT -- see SPLIT_RANDOM.
 workflow SPLIT_POSITIVES {
     take:
     ppis_ch          // tuple(meta, ppis)
@@ -56,10 +54,8 @@ workflow SPLIT_POSITIVES {
     sim_tv = cdhit_branched.train_val.map { meta, label, f -> tuple(meta, f) }
     sim_tt = cdhit_branched.train_test.map { meta, label, f -> tuple(meta, f) }
 
-    // ppis_ch (the original, pre-split PPI file) is threaded in so
-    // REMOVE_REDUNDANT can compute the KaHIP/ILP discard count itself for
-    // the PPI Partitioning chart, without needing that number passed from
-    // SORT_PPIS/SOLVE_ILP (which no longer emit any mqc content at all).
+    // ppis_ch (pre-split) is threaded in so REMOVE_REDUNDANT can compute the
+    // KaHIP/ILP discard count itself for the PPI Partitioning chart.
     nr_inputs = ppis_ch.join(homology_train_ppis).join(homology_val_ppis).join(homology_test_ppis)
         .join(homology_train_fasta).join(homology_val_fasta).join(homology_test_fasta)
         .join(sim_tv).join(sim_tt)

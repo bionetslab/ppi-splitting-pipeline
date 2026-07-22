@@ -1,9 +1,8 @@
 include { EMBED_SEQUENCES; TRAIN_CLASSIFIER } from '../processes/training'
 
-// Embeds train/val/test sequences (unless a precomputed .npz is supplied
-// per-dataset via meta.embedding_model) and trains the baseline classifier
-// on top of them. Datasets sharing the same embedding_model are embedded
-// together in one EMBED_SEQUENCES call -- see that process for why.
+// Embeds train/val/test sequences (unless a precomputed .npz is supplied via
+// meta.embedding_model) and trains the baseline classifier on top of them.
+// Datasets sharing an embedding_model are embedded together in one call.
 workflow TRAIN_BASELINE {
     take:
     train_fasta        // tuple(meta, path)

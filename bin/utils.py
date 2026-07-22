@@ -116,12 +116,9 @@ def load_embeddings(path):
 # MultiQC sample naming
 # ---------------------------------------------------------------------------
 
-# MultiQC's rendered tables/bar charts sort rows alphabetically by Sample
-# name regardless of the underlying file/row order, so a plain f"{id}_{split}"
-# Sample would show up as test_balanced, test_realistic, train, val. This
-# numeric prefix forces the requested train/val/test/test_balanced/test_realistic
-# order while keeping each dataset's rows grouped together (the id_ prefix
-# still sorts first).
+# MultiQC sorts rows alphabetically by Sample name, so a plain f"{id}_{split}"
+# would show test_balanced, test_realistic, train, val. This numeric prefix
+# forces train/val/test/test_balanced/test_realistic order per dataset.
 SPLIT_SORT_KEY = {"train": 1, "val": 2, "test": 3, "test_balanced": 4,
                   "test_realistic": 5, "discarded": 6}
 

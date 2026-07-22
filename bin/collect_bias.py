@@ -11,7 +11,6 @@ The attribute name is derived from the filename: {attribute}_bias_mqc.tsv
 """
 
 import argparse
-import csv
 import sys
 from pathlib import Path
 

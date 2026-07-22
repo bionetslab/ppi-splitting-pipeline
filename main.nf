@@ -10,10 +10,8 @@ include { SAMPLE_NEGATIVES } from './subworkflows/sample_negatives'
 include { TRAIN_BASELINE }   from './subworkflows/train_baseline'
 include { QC }               from './subworkflows/qc'
 
-// samplesheetToList() represents a blank optional cell as [] (empty list),
-// not null, regardless of the field's declared type -- so a plain `!= null`
-// check isn't enough to detect "not given" for numeric fields where 0 is a
-// legitimate override value.
+// samplesheetToList() represents a blank cell as [] (not null), even for
+// numeric fields where 0 is a legitimate override -- so check both.
 def isGiven(v) {
     !(v == null || v == [])
 }
@@ -22,9 +20,8 @@ def isGiven(v) {
 // back to the corresponding default in nextflow.config, so a single run
 // can process several datasets in parallel, each with its own overrides.
 def buildDatasetsChannel() {
-    // samplesheetToList() returns each row as a plain positional list (not
-    // a map) unless schema properties are marked "meta" -- this must match
-    // assets/schema_input.json's `properties` order exactly.
+    // samplesheetToList() returns each row as a positional list, not a map
+    // -- order here must match assets/schema_input.json's `properties`.
     def fields = [
         "id", "ppis", "sequences", "go_annotations", "species", "blast_results", "candidate_network",
         "embedding_model", "cdhit_identity", "cdhit_wordsize", "split_method", "edge_weight",

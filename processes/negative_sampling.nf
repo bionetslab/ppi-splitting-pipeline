@@ -4,11 +4,9 @@ process SAMPLE_NEGATIVES_DEGREE {
     label 'error_retry'
 
     input:
-    // positives is staged under a fixed name distinct from any "${label}.csv"
-    // output -- otherwise for label in {train, val} the staged input symlink
-    // and the output file share a name, and writing the output follows the
-    // symlink back into the upstream task's work dir, corrupting its cached
-    // output (bites you specifically on -resume, once that cache is reused).
+    // Staged under a fixed name distinct from "${label}.csv" -- otherwise for
+    // label in {train, val} the output would overwrite the staged input
+    // symlink, corrupting the upstream task's cached output on -resume.
     tuple val(meta), val(label), path(positives, stageAs: 'positives_in.csv'), val(ratio), val(uniform)  // label: "train" | "val" | "test_balanced" | "test_realistic"
 
     output:
@@ -48,7 +46,6 @@ process SAMPLE_NEGATIVES_ILP {
     script:
     def cand_arg = candidate_network ? "--candidate-network ${candidate_network}" : ''
     def lic_arg  = gurobi_license    ? "--gurobi-license ${gurobi_license}"        : ''
-    //def neg_ratio_adj = neg_ratio / (task.attempt as double)  // reduce neg_ratio for retries to avoid infeasibility
     """
     n_positives=\$(( \$(wc -l < ${positives}) - 1 ))  # -1 for the header row
     max_candidates=\$(( 4 * n_positives * ${task.attempt} ))

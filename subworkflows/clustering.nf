@@ -1,9 +1,8 @@
 include { RUN_BLAST; MAKE_METIS; RUN_KAHIP } from '../processes/clustering'
 
 // Builds the protein similarity graph (BLAST all-vs-all -> METIS graph) and
-// partitions it with KaHIP, ready for SPLIT_POSITIVES to assign train/val/test.
-// Each dataset independently decides whether to skip BLAST (pre-supplied via
-// the samplesheet's blast_results column) and how many KaHIP partitions to use.
+// partitions it with KaHIP, ready for SPLIT_POSITIVES. Each dataset can
+// skip BLAST via the samplesheet's blast_results column.
 workflow CLUSTERING {
     take:
     sequences_ch      // tuple(meta, fasta)

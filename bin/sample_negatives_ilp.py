@@ -27,12 +27,11 @@ import cvxpy as cp
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from utils import mqc_sample, read_ppis  # noqa: E402
 
-# Hard cap on each protein's total negative degree, enforced as an ILP
-# constraint (see build_problem): mx_p <= neg_ratio * (1 + MAX_DEGREE_EPSILON)
-# * d_plus_p. The soft --lambda-degree penalty alone can't prevent a handful
-# of proteins from absorbing an otherwise-unavoidable pos/neg degree-mass
-# mismatch, since it's a single aggregate residual normalized across all
-# proteins; this hard constraint bounds every protein individually.
+# Hard cap on each protein's total negative degree (see build_problem):
+# mx_p <= neg_ratio * (1 + MAX_DEGREE_EPSILON) * d_plus_p. Needed because the
+# soft --lambda-degree penalty is one aggregate residual normalized across all
+# proteins, so it alone can't stop a few proteins from absorbing the whole
+# pos/neg degree-mass mismatch.
 MAX_DEGREE_EPSILON = 5
 
 
@@ -54,7 +53,6 @@ class SamplingConfig:
     mip_gap: float = 0.01
     threads: int = 1
     seed: int = 42
-    strict_weights: bool = False
     max_candidates: int = 50_000_000
     verbose: bool = False
 
@@ -102,7 +100,6 @@ def parse_args(argv=None) -> argparse.Namespace:
     ap.add_argument("--diagnostics-out", default="neg_sampling_ilp_mqc.tsv")
     ap.add_argument("--residuals-out", default="neg_sampling_ilp_residuals_mqc.tsv",
                      help="Per-protein degree residual TSV, written only with --verbose")
-    ap.add_argument("--strict-weights", action="store_true")
     ap.add_argument("--verbose", action="store_true")
     ap.add_argument("--id", required=True, help="Dataset ID, for MultiQC tagging")
 
@@ -153,7 +150,6 @@ def config_from_args(args: argparse.Namespace) -> tuple[SamplingConfig, dict]:
         mip_gap=pick(args.mip_gap, "mip_gap", 0.01),
         threads=pick(args.threads, "threads", 1),
         seed=pick(args.seed, "seed", 42),
-        strict_weights=bool(args.strict_weights or yaml_cfg.get("strict_weights", False)),
         max_candidates=pick(args.max_candidates, "max_candidates", 50_000_000),
         verbose=bool(args.verbose),
     )
@@ -701,11 +697,9 @@ class BuildContext:
                 found = keys[pos] == q_keys
                 arr[pos[found]] = q_vals[found]
 
-                # Self-interactions with no explicit score in the confidence
-                # source default to the lowest confidence observed there
-                # (least-favored as negatives) rather than the pool default
-                # of 1.0 -- silence on a self-pair shouldn't read as
-                # high-confidence evidence that it's a real non-interaction.
+                # Unscored self-pairs default to the min observed confidence, not
+                # the pool default of 1.0 -- silence shouldn't imply high-confidence
+                # evidence of a real non-interaction.
                 is_self = self.candidates[:, 0] == self.candidates[:, 1]
                 scored = np.zeros(len(arr), dtype=bool)
                 scored[pos[found]] = True
@@ -1286,11 +1280,9 @@ def sample_negatives_ilp(name, pos_ppis, output_path, cfg: SamplingConfig, neg_r
     pos_pairs = pos_pairs_from_rows(pos_ppis, protein_to_idx)
     pos_pairs_set = {tuple(p) for p in pos_pairs.tolist()}
 
-    # Pre-load whatever the active biases need, so an over-budget subsample
-    # (build_candidate_set -> _subsample_candidate_pairs) can be informed by
-    # it instead of falling back to a plain uniform draw. Handed to
-    # build_context below too, so ensure_taxonomy()/ensure_go_bp() don't
-    # re-read the same files a second time.
+    # Pre-load whatever the active biases need so an over-budget subsample
+    # (_subsample_candidate_pairs) can use it instead of a uniform draw; also
+    # handed to build_context so ensure_taxonomy()/ensure_go_bp() don't re-read.
     taxonomy_relevant = (
         (cfg.degree_bias_mode == "unified" and cfg.lambda_degree > 0)
         or (cfg.degree_bias_mode == "split" and cfg.lambda_taxon_pair > 0)
