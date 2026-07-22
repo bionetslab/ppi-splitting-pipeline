@@ -37,13 +37,16 @@ def parse_kahip_partition(partition_path, node_mapping_path):
 
 
 def build_matrices(clusters_list, protein_to_cluster, ppi_rows):
+    """
+    Counts the number of PPIs within each cluster and between clusters.
+
+    :param clusters_list: List of the cluster IDs returned by KaHIP
+    :param protein_to_cluster: Assignment of the protein IDs to the cluster IDs
+    :param ppi_rows: The PPI dataset
+    :return:
+    """
     n = len(clusters_list)
     cluster_to_idx = {c: i for i, c in enumerate(clusters_list)}
-
-    weights = np.zeros(n, dtype=np.float64)
-    for p, c in protein_to_cluster.items():
-        if c in cluster_to_idx:
-            weights[cluster_to_idx[c]] += 1
 
     intra_ppi = np.zeros(n, dtype=np.float64)
     cross_ppi = np.zeros((n, n), dtype=np.float64)  # upper triangle; cross_ppi[i,j] = count for i < j
@@ -61,7 +64,7 @@ def build_matrices(clusters_list, protein_to_cluster, ppi_rows):
         else:
             cross_ppi[min(i, j), max(i, j)] += 1
 
-    return weights, cross_ppi, intra_ppi
+    return cross_ppi, intra_ppi
 
 
 def solve_ilp(clusters_list, intra_ppi, cross_ppi, splits, names, epsilon, max_sec, solver):
@@ -74,7 +77,7 @@ def solve_ilp(clusters_list, intra_ppi, cross_ppi, splits, names, epsilon, max_s
 
         (2) Σ_{i=1}^n x[s,c_i] * k(c_i,c_i) + Σ_{i=1}^{n-1}Σ_{j=i+1}^{n} x[s,c_i] * x[s,c_j] * k(c_i,c_j)
         ≥ (1-ε) * f_s * Σ_{s=1}^S Σ_{i=1}^{n} Σ_{j=i}^{n} x[s,c_i] * x[s,c_j] * k(c_i,c_j)
-        ∀s  (minimum split size)
+        ∀s  (minimum split size) -> the product x[s, c_i] * x[s, c_j] is linearized with z
 
         with k(c_i,c_j) := number of PPIs between clusters c_i and c_j and f_s := fraction of PPIs in split s.
         intra_ppi[i] = k(c_i,c_i); cross_ppi[i,j] = k(c_i,c_j) for i < j (upper triangle, actual counts).
@@ -91,14 +94,9 @@ def solve_ilp(clusters_list, intra_ppi, cross_ppi, splits, names, epsilon, max_s
     # Constraint 1: every cluster is in exactly one split.
     constraints = [cp.sum(x, axis=0) == np.ones(n_clusters)]
 
-    # Constraint 2: each split receives ≥ (1-ε)·f_s of all selected PPIs.
-    #
-    # PPIs in split s = intra-cluster PPIs of clusters in s
-    #                 + cross-cluster PPIs where BOTH clusters are in s
-    #
-    # The product x[s,i]·x[s,j] (both clusters in same split) is linearised:
-    #   introduce z[s,k] ∈ {0,1} for each pair k=(i,j) with k(c_i,c_j) > 0
-    #   z[s,k] ≤ x[s,i],  z[s,k] ≤ x[s,j],  z[s,k] ≥ x[s,i] + x[s,j] − 1
+    # Helper constraint; constraint 2 to linearize x[s,i]·x[s,j] (both clusters in same split):
+    # introduce z[s,k] ∈ {0,1} for each pair k=(i,j) with k(c_i,c_j) > 0
+    # z[s,k] ≤ x[s,i],  z[s,k] ≤ x[s,j],  z[s,k] ≥ x[s,i] + x[s,j] − 1
     loss_pairs = [
         (i, j)
         for i in range(n_clusters)
@@ -123,13 +121,17 @@ def solve_ilp(clusters_list, intra_ppi, cross_ppi, splits, names, epsilon, max_s
         z              = None
         total_assigned = float(np.sum(intra_ppi))
 
+    # Constraint 3: each split receives ≥ (1-ε)·f_s of all selected PPIs.
+    # PPIs in split s = intra-cluster PPIs of clusters in s
+    #                 + cross-cluster PPIs where BOTH clusters are in s
+    #
     for s, frac in enumerate(splits):
         ppi_in_s = cp.sum(cp.multiply(intra_ppi, x[s]))
         if z is not None:
             ppi_in_s = ppi_in_s + cross_counts @ z[s]
         constraints.append((1.0 - epsilon) * frac * total_assigned <= ppi_in_s)
 
-    # Objective: minimise discarded cross-cluster PPIs.
+    # Objective: minimize discarded cross-cluster PPIs.
     # Since each cluster is in exactly one split (constraint 1),
     # cp.max(x[s,i] − x[s,j]) over s = 1 iff i and j are in different splits, 0 otherwise,
     # which equals (1 − Σ_s x[s,i]·x[s,j]) from the docstring.
@@ -215,7 +217,7 @@ def main():
           f"median {sizes[len(sizes)//2]:,}", file=sys.stderr)
 
     print("Building problem matrices …", file=sys.stderr)
-    weights, cross_ppi, intra_ppi = build_matrices(clusters_list, protein_to_cluster, ppi_rows)
+    cross_ppi, intra_ppi = build_matrices(clusters_list, protein_to_cluster, ppi_rows)
     n_loss_pairs = int(np.sum(cross_ppi > 0))
     total_cross  = int(np.sum(cross_ppi))
     print(f"  {n_loss_pairs:,} cluster pairs with cross-cluster PPIs "
