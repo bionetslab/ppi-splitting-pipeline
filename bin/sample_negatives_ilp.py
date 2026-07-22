@@ -28,11 +28,11 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from utils import mqc_sample, read_ppis  # noqa: E402
 
 # Hard cap on each protein's total negative degree (see build_problem):
-# mx_p <= neg_ratio * (1 + MAX_DEGREE_EPSILON) * d_plus_p. Needed because the
+# mx_p <= neg_ratio * (1 + MAX_DEGREE_SLACK) * d_plus_p. Needed because the
 # soft --lambda-degree penalty is one aggregate residual normalized across all
 # proteins, so it alone can't stop a few proteins from absorbing the whole
 # pos/neg degree-mass mismatch.
-MAX_DEGREE_EPSILON = 5
+MAX_DEGREE_SLACK = 5
 
 
 # ============================================================
@@ -1067,9 +1067,9 @@ _TERM_KEY = {
 
 def _max_degree_cap(ctx: BuildContext) -> np.ndarray:
     """Per-protein hard cap on total negative degree: neg_ratio * (1 +
-    MAX_DEGREE_EPSILON) * d_plus. See MAX_DEGREE_EPSILON at the top of the file."""
+    MAX_DEGREE_SLACK) * d_plus. See MAX_DEGREE_SLACK at the top of the file."""
     dplus = _degree_array(ctx.pos_pairs, ctx.n_proteins)
-    return ctx.r * (1.0 + MAX_DEGREE_EPSILON) * dplus
+    return ctx.r * (1.0 + MAX_DEGREE_SLACK) * dplus
 
 
 def build_problem(ctx: BuildContext, confidence: ConfidenceLoss, active_biases, cfg: SamplingConfig):
@@ -1360,7 +1360,7 @@ def sample_negatives_ilp(name, pos_ppis, output_path, cfg: SamplingConfig, neg_r
     except RuntimeError as exc:
         raise RuntimeError(
             f"{exc} Note: every split enforces a hard per-protein negative-degree "
-            f"cap of neg_ratio * {1 + MAX_DEGREE_EPSILON} * d_plus; infeasibility "
+            f"cap of neg_ratio * {1 + MAX_DEGREE_SLACK} * d_plus; infeasibility "
             f"often means the positive set's structure (e.g. too many "
             f"self-interactions relative to available negative self-pairs) makes "
             f"exact ratio-matched negatives impossible. Consider lowering --neg-ratio."
