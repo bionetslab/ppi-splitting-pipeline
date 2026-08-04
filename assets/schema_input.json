@@ -67,6 +67,34 @@
         "errorMessage": "If supplied, node_mapping must be a path to an existing node_mapping.tsv. Only used when --split_only is set (bypasses CLUSTERING).",
         "pattern": "node_mapping\\.tsv$"
       },
+      "train_ppis": {
+        "type": "string",
+        "format": "file-path",
+        "exists": true,
+        "errorMessage": "If supplied, train_ppis must be a path to an existing train split CSV. Only used when --bias_only is set (bypasses everything upstream of the bias diagnostics).",
+        "pattern": "^.*\\.csv$"
+      },
+      "val_ppis": {
+        "type": "string",
+        "format": "file-path",
+        "exists": true,
+        "errorMessage": "If supplied, val_ppis must be a path to an existing val split CSV. Only used when --bias_only is set (bypasses everything upstream of the bias diagnostics).",
+        "pattern": "^.*\\.csv$"
+      },
+      "test_balanced_ppis": {
+        "type": "string",
+        "format": "file-path",
+        "exists": true,
+        "errorMessage": "If supplied, test_balanced_ppis must be a path to an existing balanced test split CSV. Only used when --bias_only is set (bypasses everything upstream of the bias diagnostics).",
+        "pattern": "^.*\\.csv$"
+      },
+      "test_realistic_ppis": {
+        "type": "string",
+        "format": "file-path",
+        "exists": true,
+        "errorMessage": "If supplied, test_realistic_ppis must be a path to an existing realistic test split CSV. Only used when --bias_only is set (bypasses everything upstream of the bias diagnostics).",
+        "pattern": "^.*\\.csv$"
+      },
       "embedding_model": {
         "type": "string",
         "errorMessage": "embedding_model must be 'none', 'esm2', 'prot_t5', or a path to a precomputed .npz",

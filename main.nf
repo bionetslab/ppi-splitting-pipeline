@@ -9,22 +9,21 @@ include { SPLIT_POSITIVES }  from './subworkflows/split_positives'
 include { SAMPLE_NEGATIVES } from './subworkflows/sample_negatives'
 include { TRAIN_BASELINE }   from './subworkflows/train_baseline'
 include { QC }               from './subworkflows/qc'
+include { BIAS_DIAGNOSTICS } from './subworkflows/bias_diagnostics'
 
-// samplesheetToList() represents a blank cell as [] (not null), even for
-// numeric fields where 0 is a legitimate override -- so check both.
 def isGiven(v) {
     !(v == null || v == [])
 }
 
-// One row per PPI dataset. Anything left blank in the samplesheet falls
-// back to the corresponding default in nextflow.config, so a single run
-// can process several datasets in parallel, each with its own overrides.
+// One row per PPI dataset. Anything left blank in the samplesheet falls back to the corresponding default in
+// nextflow.config, so a single run can process several datasets in parallel, each with its own overrides.
 def buildDatasetsChannel() {
-    // samplesheetToList() returns each row as a positional list, not a map
-    // -- order here must match assets/schema_input.json's `properties`.
+    // samplesheetToList() returns each row as a positional list, not a map.
+    // Order here must match assets/schema_input.json's `properties`.
     def fields = [
         "id", "ppis", "sequences", "go_annotations", "species", "blast_results", "candidate_network",
         "partition", "node_mapping",
+        "train_ppis", "val_ppis", "test_balanced_ppis", "test_realistic_ppis",
         "embedding_model", "cdhit_identity", "cdhit_wordsize", "split_method", "edge_weight",
         "kahip_k", "ilp_kahip_k", "train_split", "val_split", "test_split", "ilp_epsilon", "ilp_max_sec",
         "negative_sampling_method",
@@ -37,12 +36,23 @@ def buildDatasetsChannel() {
         def row = [fields, rowList].transpose().collectEntries { k, v -> [(k): v] }
 
         // split_only skips FETCH_DATA/CLUSTERING/TRAIN_BASELINE/QC entirely,
-        // so every one of those steps' precomputed-input escape hatches
-        // becomes mandatory, and the split/negative-sampling method choice
-        // is no longer per-dataset -- it's always the ILP path.
+        // split/negative-sampling method choice is no longer per-dataset; it's always the ILP path.
         if (params.split_only) {
             if (!(row.sequences && row.go_annotations && row.species && row.partition && row.node_mapping)) {
                 error("--split_only requires every samplesheet row to supply sequences, go_annotations, species, partition, and node_mapping (row '${row.id}' is missing at least one).")
+            }
+        }
+
+        // bias_only skips DATA_PREP/CLUSTERING/SPLIT_POSITIVES/
+        // SAMPLE_NEGATIVES/TRAIN_BASELINE entirely, so the splits, BLAST hits, GO/species tables, and embeddings
+        // must all be supplied precomputed.
+        if (params.bias_only) {
+            if (!(row.train_ppis && row.val_ppis && row.test_balanced_ppis && row.test_realistic_ppis
+                  && row.go_annotations && row.species && row.blast_results)) {
+                error("--bias_only requires every samplesheet row to supply train_ppis, val_ppis, test_balanced_ppis, test_realistic_ppis, go_annotations, species, and blast_results (row '${row.id}' is missing at least one).")
+            }
+            if (!isGiven(row.embedding_model) || row.embedding_model in ["none", "esm2", "prot_t5"]) {
+                error("--bias_only requires embedding_model to be a path to a precomputed .npz (row '${row.id}' has '${row.embedding_model}') -- there's no embedding step to compute it.")
             }
         }
 
@@ -76,6 +86,10 @@ def buildDatasetsChannel() {
             row.candidate_network ? file(row.candidate_network, checkIfExists: true) : [],
             row.partition         ? file(row.partition,         checkIfExists: true) : [],
             row.node_mapping      ? file(row.node_mapping,      checkIfExists: true) : [],
+            row.train_ppis          ? file(row.train_ppis,          checkIfExists: true) : [],
+            row.val_ppis             ? file(row.val_ppis,             checkIfExists: true) : [],
+            row.test_balanced_ppis   ? file(row.test_balanced_ppis,   checkIfExists: true) : [],
+            row.test_realistic_ppis  ? file(row.test_realistic_ppis,  checkIfExists: true) : [],
         )
     }
 }
@@ -83,52 +97,83 @@ def buildDatasetsChannel() {
 workflow {
     datasets_ch = buildDatasetsChannel()
 
-    ppis_ch = datasets_ch.map { meta, ppis, sequences, go_annotations, species, blast_results, candidate_network, partition, node_mapping -> tuple(meta, ppis) }
-
-    data = DATA_PREP(
-        datasets_ch.map { meta, ppis, sequences, go_annotations, species, blast_results, candidate_network, partition, node_mapping ->
-            tuple(meta, ppis, sequences, go_annotations, species, blast_results, candidate_network)
+    if (params.bias_only) {
+        bias_paths = datasets_ch.map { meta, ppis, sequences, go_annotations, species, blast_results, candidate_network, partition, node_mapping, train_ppis, val_ppis, test_balanced_ppis, test_realistic_ppis ->
+            [
+                meta          : meta,
+                train         : train_ppis,
+                val           : val_ppis,
+                test_balanced : test_balanced_ppis,
+                test_realistic: test_realistic_ppis,
+                blast         : blast_results,
+                embeddings    : file(meta.embedding_model, checkIfExists: true),
+                go_annotations: go_annotations,
+                species       : species,
+            ]
         }
-    )
 
-    if (params.split_only) {
-        // --split_only: partition/node_mapping are precomputed and required
-        // (validated in buildDatasetsChannel), so CLUSTERING (FETCH_DATA/
-        // RUN_BLAST/MAKE_METIS/RUN_KAHIP) never needs to run at all.
-        partition_ch    = datasets_ch.map { meta, ppis, sequences, go_annotations, species, blast_results, candidate_network, partition, node_mapping -> tuple(meta, partition) }
-        node_mapping_ch = datasets_ch.map { meta, ppis, sequences, go_annotations, species, blast_results, candidate_network, partition, node_mapping -> tuple(meta, node_mapping) }
+        BIAS_DIAGNOSTICS(
+            bias_paths.map { p -> tuple(p.meta, p.train) },
+            bias_paths.map { p -> tuple(p.meta, p.val) },
+            bias_paths.map { p -> tuple(p.meta, p.test_balanced) },
+            bias_paths.map { p -> tuple(p.meta, p.test_realistic) },
+            bias_paths.map { p -> tuple(p.meta, p.blast) },
+            bias_paths.map { p -> tuple(p.meta, p.embeddings) },
+            bias_paths.map { p -> tuple(p.meta, p.go_annotations) },
+            bias_paths.map { p -> tuple(p.meta, p.species) },
+        )
     } else {
-        clustered = CLUSTERING(
-            data.sequences, data.lengths,
-            datasets_ch.map { meta, ppis, sequences, go_annotations, species, blast_results, candidate_network, partition, node_mapping -> tuple(meta, blast_results) }
-        )
-        partition_ch    = clustered.partition
-        node_mapping_ch = clustered.node_mapping
-    }
+        ppis_ch = datasets_ch.map { meta, ppis, sequences, go_annotations, species, blast_results, candidate_network, partition, node_mapping, train_ppis, val_ppis, test_balanced_ppis, test_realistic_ppis -> tuple(meta, ppis) }
 
-    split = SPLIT_POSITIVES(ppis_ch, data.sequences, partition_ch, node_mapping_ch)
-
-    neg = SAMPLE_NEGATIVES(
-        split.train_ppis, split.val_ppis, split.test_ppis,
-        data.species, data.go_annotations,
-        datasets_ch.map { meta, ppis, sequences, go_annotations, species, blast_results, candidate_network, partition, node_mapping -> tuple(meta, candidate_network) }
-    )
-
-    // --split_only stops here: SOLVE_ILP (via SPLIT_POSITIVES) + CDHIT2D +
-    // REMOVE_REDUNDANT + SAMPLE_NEGATIVES_ILP have already produced and
-    // published the four split files; TRAIN_BASELINE/QC add nothing this
-    // mode asks for.
-    if (!params.split_only) {
-        baseline = TRAIN_BASELINE(
-            split.train_fasta, split.val_fasta, split.test_fasta,
-            neg.train, neg.val, neg.test_balanced, neg.test_realistic
+        data = DATA_PREP(
+            datasets_ch.map { meta, ppis, sequences, go_annotations, species, blast_results, candidate_network, partition, node_mapping, train_ppis, val_ppis, test_balanced_ppis, test_realistic_ppis ->
+                tuple(meta, ppis, sequences, go_annotations, species, blast_results, candidate_network)
+            }
         )
 
-        QC(
-            neg.train, neg.val, neg.test_balanced, neg.test_realistic,
-            clustered.blast_out, baseline.embeddings, data.go_annotations, data.species,
-            split.train_fasta, split.val_fasta, split.test_fasta,
-            split.sorted_mqc, split.nr_mqc, neg.mqc, baseline.mqc
+        if (params.split_only) {
+            // --split_only: partition/node_mapping are precomputed and required
+            // (validated in buildDatasetsChannel), so CLUSTERING (FETCH_DATA/
+            // RUN_BLAST/MAKE_METIS/RUN_KAHIP) never needs to run at all.
+            partition_ch    = datasets_ch.map { meta, ppis, sequences, go_annotations, species, blast_results, candidate_network, partition, node_mapping, train_ppis, val_ppis, test_balanced_ppis, test_realistic_ppis -> tuple(meta, partition) }
+            node_mapping_ch = datasets_ch.map { meta, ppis, sequences, go_annotations, species, blast_results, candidate_network, partition, node_mapping, train_ppis, val_ppis, test_balanced_ppis, test_realistic_ppis -> tuple(meta, node_mapping) }
+        } else {
+            clustered = CLUSTERING(
+                data.sequences, data.lengths,
+                datasets_ch.map { meta, ppis, sequences, go_annotations, species, blast_results, candidate_network, partition, node_mapping, train_ppis, val_ppis, test_balanced_ppis, test_realistic_ppis -> tuple(meta, blast_results) }
+            )
+            partition_ch    = clustered.partition
+            node_mapping_ch = clustered.node_mapping
+        }
+
+        split = SPLIT_POSITIVES(ppis_ch, data.sequences, partition_ch, node_mapping_ch)
+
+        neg = SAMPLE_NEGATIVES(
+            split.train_ppis, split.val_ppis, split.test_ppis,
+            data.species, data.go_annotations,
+            datasets_ch.map { meta, ppis, sequences, go_annotations, species, blast_results, candidate_network, partition, node_mapping, train_ppis, val_ppis, test_balanced_ppis, test_realistic_ppis -> tuple(meta, candidate_network) }
         )
+
+        // --split_only stops here: SOLVE_ILP (via SPLIT_POSITIVES) + CDHIT2D +
+        // REMOVE_REDUNDANT + SAMPLE_NEGATIVES_ILP have already produced and
+        // published the four split files; TRAIN_BASELINE/QC add nothing this
+        // mode asks for.
+        if (!params.split_only) {
+            baseline = TRAIN_BASELINE(
+                split.train_fasta, split.val_fasta, split.test_fasta,
+                neg.train, neg.val, neg.test_balanced, neg.test_realistic
+            )
+
+            bias = BIAS_DIAGNOSTICS(
+                neg.train, neg.val, neg.test_balanced, neg.test_realistic,
+                clustered.blast_out, baseline.embeddings, data.go_annotations, data.species
+            )
+
+            QC(
+                bias.mqc, clustered.blast_out,
+                split.train_fasta, split.val_fasta, split.test_fasta,
+                split.sorted_mqc, split.nr_mqc, neg.mqc, baseline.mqc
+            )
+        }
     }
 }
