@@ -15,7 +15,7 @@
         "type": "string",
         "format": "file-path",
         "exists": true,
-        "errorMessage": "ppis must be a path to an existing PPI CSV file",
+        "errorMessage": "ppis must be a path to an existing PPI CSV file. Required unless --bias_only is set.",
         "pattern": "^.*\\.csv$"
       },
       "sequences": {
@@ -177,6 +177,6 @@
         "minimum": 0
       }
     },
-    "required": ["id", "ppis"]
+    "required": ["id"]
   }
 }

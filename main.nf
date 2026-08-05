@@ -35,6 +35,13 @@ def buildDatasetsChannel() {
     return channel.fromList(rows).map { rowList ->
         def row = [fields, rowList].transpose().collectEntries { k, v -> [(k): v] }
 
+        // Every mode except --bias_only reads the raw PPI CSV (DATA_PREP/
+        // SPLIT_POSITIVES); --bias_only never touches it, so it's the one
+        // mode where ppis may be left blank in the samplesheet.
+        if (!params.bias_only && !isGiven(row.ppis)) {
+            error("ppis is required for every samplesheet row unless --bias_only is set (row '${row.id}' is missing it).")
+        }
+
         // split_only skips FETCH_DATA/CLUSTERING/TRAIN_BASELINE/QC entirely,
         // split/negative-sampling method choice is no longer per-dataset; it's always the ILP path.
         if (params.split_only) {
@@ -78,7 +85,7 @@ def buildDatasetsChannel() {
             neg_ilp_lambda_jaccard   : isGiven(row.neg_ilp_lambda_jaccard)    ? row.neg_ilp_lambda_jaccard    : params.neg_ilp_lambda_jaccard,
         ]
         tuple(meta,
-            file(row.ppis, checkIfExists: true),
+            row.ppis              ? file(row.ppis,              checkIfExists: true) : [],
             row.sequences         ? file(row.sequences,         checkIfExists: true) : [],
             row.go_annotations    ? file(row.go_annotations,    checkIfExists: true) : [],
             row.species           ? file(row.species,           checkIfExists: true) : [],
