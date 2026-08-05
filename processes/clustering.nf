@@ -10,7 +10,7 @@ process RUN_BLAST {
 
     script:
     """
-    makeblastdb -dbtype prot -in ${fasta} -out blastdb -parse_seqids
+    makeblastdb -dbtype prot -in ${fasta} -out blastdb
     blastp \\
         -query ${fasta} \\
         -db blastdb \\
