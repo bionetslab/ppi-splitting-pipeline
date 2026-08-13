@@ -59,7 +59,7 @@ def parse_blast_pident(path):
             if len(cols) < 5:
                 continue
             q = cols[0]
-            s = cols[1].split("|")[1] if "|" in cols[1] else cols[1]
+            s = cols[1]
             if q == s:
                 continue
             try:
@@ -177,7 +177,7 @@ def _prepare_split(pairs, y, embeddings):
 
 
 def func_relatedness(pairs, go_anns, category):
-    """Jaccard similarity of GO term sets for one category per pair; 0.0 if union is empty."""
+    """Jaccard index of GO term sets for one category per pair; 0.0 if union is empty."""
     empty = frozenset()
     sims = []
     for p1, p2 in pairs:

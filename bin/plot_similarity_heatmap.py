@@ -36,7 +36,7 @@ def build_bitscore_matrix(blast_path, protein_ids):
             if len(cols) < 4:
                 continue
             q = cols[0]
-            s = cols[1].split("|")[1] if "|" in cols[1] else cols[1]
+            s = cols[1]
             if q == s or q not in id_set or s not in id_set:
                 continue
             try:

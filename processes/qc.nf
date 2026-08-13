@@ -1,4 +1,5 @@
 process BIAS_ANALYSIS {
+    publishDir(path: { "${params.outdir}/${meta.id}/multiqc" }, mode: 'copy')
     tag "${meta.id}_${attribute}"
     label 'error_retry'
 

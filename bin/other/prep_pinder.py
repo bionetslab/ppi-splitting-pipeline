@@ -1,4 +1,7 @@
-"""Before any of this, download pinder with gsutil -m cp gs://pinder/2024-02/ your_pinder_dir/pinder"""
+"""Before any of this, download the pinder index:
+ mkdir your_pinder_dir/pinder
+ gsutil -m cp gs://pinder/2024-02/index.parquet your_pinder_dir/pinder
+"""
 
 import json
 import os
@@ -21,7 +24,7 @@ from bin.fetch_data import (
     write_species_tsv,
 )
 
-PATH_TO_PINDER = "~/Downloads/pinder/2024-02"
+PATH_TO_PINDER = "your_pinder_dir/pinder"
 RCSB_FASTA_URL = "https://www.rcsb.org/fasta/entry/{pdb_id}"
 OUT_DIR = "../../data"
 SEQ_OUT = f"{OUT_DIR}/pinder_sequences.fasta"
