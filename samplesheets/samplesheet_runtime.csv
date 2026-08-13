@@ -1,0 +1,6 @@
+id,ppis,embedding_model,split_method,ilp_kahip_k,ilp_max_sec,neg_ilp_time_limit,negative_sampling_method,neg_ilp_lambda_degree,neg_ilp_lambda_taxon_pair,neg_ilp_lambda_self_loop,neg_ilp_lambda_jaccard,candidate_network
+Hippie-regular,data/HIPPIE-current.csv,data/all_embeddings_esm2.npz,,,7200,7200,,,,,
+Hippie-ILP-split,data/HIPPIE-current.csv,data/all_embeddings_esm2.npz,ilp,100,7200,7200,,,,,
+Hippie-ILP-split-and-sampling,data/HIPPIE-current.csv,data/all_embeddings_esm2.npz,ilp,100,7200,7200,ilp,1,0.0,1,1
+Hippie-Leakage-split,data/HIPPIE-current.csv,data/all_embeddings_esm2.npz,random,,7200,7200,uniform,,,,
+Hippie-ILP-hcn,data/HIPPIE-current.csv,data/all_embeddings_esm2.npz,ilp,100,7200,7200,ilp,1,0,1,1,data/high_conf_neg.csv
