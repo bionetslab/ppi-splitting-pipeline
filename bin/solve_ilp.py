@@ -96,7 +96,7 @@ def solve_ilp(clusters_list, intra_ppi, cross_ppi, splits, names, epsilon, max_s
     cross_counts = np.array([cross_ppi[i, j] for i, j in loss_pairs])  # actual PPI counts
 
     if loss_pairs:
-        z = cp.Variable((n_splits, len(loss_pairs)), boolean=True)
+        z = cp.Variable((n_splits, len(loss_pairs)), nonneg=True)
         for k, (i, j) in enumerate(loss_pairs):
             for s in range(n_splits):
                 constraints += [
