@@ -389,7 +389,7 @@ This fits a Ridge regressor (on positive pairs only) to predict each STRING evid
 
 ## Requirements
 
-- [Nextflow](https://www.nextflow.io/) ≥ 23.10
+- [Nextflow](https://www.nextflow.io/) ≥ 26
 - Conda (for the environment) — or install the packages in `environment.yml` manually
 - Internet access for the initial UniProt fetch (subsequent runs use cached Nextflow work directories)
 - A GPU is recommended but not required for `esm2` and `prot_t5` embedding models
