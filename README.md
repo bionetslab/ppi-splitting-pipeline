@@ -7,6 +7,17 @@ Have a look at the [Wiki](https://github.com/bionetslab/ppi-splitting-pipeline/w
 
 ![Pipeline overview](metro_map.svg)
 
+---
+
+## Requirements
+
+- [Nextflow](https://www.nextflow.io/) ≥ 26
+- Conda (for the environment) — or install the packages in `environment.yml` manually
+- Internet access for the initial UniProt fetch (subsequent runs use cached Nextflow work directories)
+- A GPU is recommended but not required for `esm2` and `prot_t5` embedding models
+
+---
+
 ## Quick Start
 
 ### Input PPI File
@@ -60,11 +71,6 @@ profiles {
 The MultiQC report can be found at `results/multiqc/multiqc_report.html`, which you can view in a browser.
 
 ---
-
-## Workflow
-
-![Pipeline overview](metro_map.svg)
-
 
 ### Step descriptions
 
@@ -128,47 +134,6 @@ Attributes analyzed:
 **SIMILARITY_HEATMAP** — Plots a heatmap of pairwise BLASTp similarity between proteins in different splits, to visualize the degree of leakage.
 
 **MULTIQC** — Collects every dataset's `*_mqc.tsv`/`*_mqc.html` files into one combined report for the whole run (`results/multiqc/`). Per-attribute bias tables are excluded (the bias-scatter plot supersedes them); General Statistics, Classifier Performance, and Positive vs Negative Pairs are merged across datasets (qualified sample names + an `ID` column); PPI Partitioning, the similarity heatmap, and the bias-scatter plot remain one separate panel per dataset.
-
----
-
-## Outputs
-
-Every dataset from the samplesheet gets its own subtree under `--outdir`, named by its `id` column. Work shared across datasets (the deduplicated UniProt fetch and any embeddings shared by datasets requesting the same model) lives under a separate `_shared/` folder rather than being duplicated into every dataset's subtree. The combined MultiQC report for the whole run lives at the top level, `results/multiqc/`:
-
-```
-results/
-├── _shared/
-│   ├── data/                         # One deduplicated UniProt fetch batch (see Multiple datasets below)
-│   │   └── sequences.fasta, go_annotations.tsv, species.tsv
-│   └── embeddings/
-│       └── embeddings_<model>.npz    # One file per distinct embedding_model requested across datasets
-├── multiqc/
-│   ├── multiqc_report.html           # One combined report for the whole run
-│   └── multiqc_report_data/          # MultiQC data folder
-└── <id>/
-    ├── multiqc/
-    │   └── similarity_heatmap.html   # Standalone copy of this dataset's heatmap (also embedded in the combined report)
-    ├── data/
-    │   └── go_annotations.tsv        # GO annotations for this dataset's own proteins
-    │   └── sequences.fasta           # FASTA for this dataset's own proteins
-    │   └── species.tsv               # NCBI taxon IDs for this dataset's own proteins
-    ├── similarities/
-    │   └── all_vs_all.tsv            # BLAST evalue, bitscore and pident between this dataset's own proteins
-    │   └── similarity.graph          # KaHIP input graph = all vs. all similarity graph (weighted edges) in METIS format
-    │   └── node_mapping.tsv          # KaHIP just enumerates nodes, this maps them to protein IDs
-    │   └── partitioned_proteome.txt  # KaHIP partitioned proteome (protein IDs) 
-    ├── train.csv                     # Final labelled splits (positives + negatives)
-    ├── val.csv
-    ├── test_balanced.csv
-    └── test_realistic.csv            # with 1:10 ratio of positives:negatives, negatives are uniformly sampled
-```
-
-`data/sequences.fasta` (and its `go_annotations.tsv`/`species.tsv`) is
-always this dataset's own subset, even for datasets whose UniProt fetch was
-folded into a shared batch with other datasets — this matters most for
-`similarities/all_vs_all.tsv`, since BLAST's E-value/bitscore statistics
-depend on exactly which proteins are in its search database, so it always
-runs per-dataset even when the underlying sequences came from a shared fetch.
 
 ---
 
@@ -368,28 +333,3 @@ degree-weighted way rather than used in full.
 Each split's process writes its own `<split>_mqc.tsv` diagnostics row and,
 optionally, `<split>_residuals_mqc.tsv` (per-protein degree residuals); MultiQC
 picks up all of them.
-
----
-
-## Standalone STRING channel analysis
-
-To investigate which STRING evidence channels explain classifier performance differences between datasets, use the standalone script (not part of the Nextflow pipeline):
-
-```bash
-python bin/analyse_string_channels.py \
-    --train      results/<id>/train.csv \
-    --test       results/<id>/test_balanced.csv \
-    --embeddings results/_shared/embeddings/embeddings_<model>.npz \
-    --out        string_channel_analysis.tsv
-```
-
-This fits a Ridge regressor (on positive pairs only) to predict each STRING evidence channel score from pair embeddings, and reports train and test Spearman ρ per channel. `combined_score` is excluded since it is derived from the individual channels.
-
----
-
-## Requirements
-
-- [Nextflow](https://www.nextflow.io/) ≥ 26
-- Conda (for the environment) — or install the packages in `environment.yml` manually
-- Internet access for the initial UniProt fetch (subsequent runs use cached Nextflow work directories)
-- A GPU is recommended but not required for `esm2` and `prot_t5` embedding models
