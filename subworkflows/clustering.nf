@@ -2,7 +2,9 @@ include { RUN_BLAST; MAKE_METIS; RUN_KAHIP } from '../processes/clustering'
 
 // Builds the protein similarity graph (BLAST all-vs-all -> METIS graph) and
 // partitions it with KaHIP, ready for SPLIT_POSITIVES. Each dataset can
-// skip BLAST via the samplesheet's blast_results column.
+// skip BLAST via the samplesheet's blast_results column. BLAST still runs
+// for "random"-split datasets (bias diagnostics/QC need it), but METIS/KaHIP
+// don't -- SPLIT_POSITIVES's random branch never looks at the partition.
 workflow CLUSTERING {
     take:
     sequences_ch      // tuple(meta, fasta)
@@ -19,7 +21,14 @@ workflow CLUSTERING {
 
     blast_out = RUN_BLAST(branched.needs_blast).mix(branched.precomputed)
 
-    metis_out = MAKE_METIS(blast_out.join(lengths_ch))
+    metis_branched = blast_out.join(lengths_ch).branch { meta, results, lengths ->
+        skip_partition: meta.split_method == "random"
+            return meta
+        needs_partition: true
+            return tuple(meta, results, lengths)
+    }
+
+    metis_out = MAKE_METIS(metis_branched.needs_partition)
 
     // The ILP splitter clusters proteins into many small KaHIP partitions
     // first, whereas the default splitter partitions straight into train/val/test.
@@ -27,10 +36,12 @@ workflow CLUSTERING {
         def k = (meta.split_method == "ilp") ? meta.ilp_kahip_k : meta.kahip_k
         tuple(meta, graph, k)
     }
-    partition = RUN_KAHIP(kahip_inputs)
+    kahip_out = RUN_KAHIP(kahip_inputs)
+
+    skipped = metis_branched.skip_partition.map { meta -> tuple(meta, []) }
 
     emit:
     blast_out    = blast_out
-    node_mapping = metis_out.node_mapping
-    partition    = partition
+    node_mapping = metis_out.node_mapping.mix(skipped)
+    partition    = kahip_out.mix(skipped)
 }
