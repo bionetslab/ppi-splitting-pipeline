@@ -4,14 +4,15 @@ library(stringr)
 library(cowplot)
 library(scales)
 
-### Parse Nextflow HTML execution reports #####################################
-# Each report embeds its trace table as a JS object literal (`window.data = {...}`),
-# not strict JSON (e.g. it contains unescaped `\'`), so we pull out the fields we
-# need with regex instead of a full JSON parse.
+report_paths <- c(
+  prott5_run = "/path/to/report-20260818-57891661.html"
+)
+
+run_labels <- c(
+  prott5_run = "ProtT5 Run"
+)
 
 parse_nf_report <- function(path) {
-  # HTML preamble contains multi-byte characters, so base regexpr/substring
-  # (which fall back to byte offsets here) misalign; stringr stays char-based.
   content <- paste(readLines(path, warn = FALSE), collapse = "\n")
 
   data_start <- str_locate(content, fixed("window.data = {"))[1, "end"]
@@ -36,24 +37,12 @@ parse_nf_report <- function(path) {
   )
 }
 
-report_paths <- c(
-  #main_pipeline = "~/Downloads/report-20260813-60002634.html"
-  prott5_run = "~/Downloads/report-20260818-57891661.html"
-)
-
-run_labels <- c(
-  #main_pipeline = "Hippie whole run"
-  prott5_run = "ProtT5 Run"
-)
-
 all_tasks <- rbindlist(lapply(names(report_paths), function(nm) {
   dt <- parse_nf_report(path.expand(report_paths[[nm]]))
   dt[, run := run_labels[[nm]]]
   dt
 }))
 
-# Nextflow marks resumed tasks as CACHED and still reports the resource usage
-# recorded during their original execution, so they are kept in the analysis.
 all_tasks[, `:=`(
   module   = sub(":.*$", "", process),
   runtime_min = realtime / 1000 / 60,

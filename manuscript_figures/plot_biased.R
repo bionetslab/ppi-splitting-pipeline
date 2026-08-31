@@ -9,7 +9,7 @@ library(cowplot)
 library(gridGraphics)
 library(Matrix)
 
-core_path <- "/Users/uh61ygag/PythonProjects/ppi-splitting-pipeline/results_server/"
+core_path <- "/path/to/ppi-splitting-pipeline/results_server/"
 path_to_results <- paste0(core_path, "multiqc_non_struc/")
 path_to_struc_results <- paste0(core_path, "multiqc_structural/")
 path_to_pdb_results <- paste0(core_path, "multiqc_PDB/")
