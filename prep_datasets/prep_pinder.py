@@ -26,7 +26,7 @@ from bin.fetch_data import (
 
 PATH_TO_PINDER = "your_pinder_dir/pinder"
 RCSB_FASTA_URL = "https://www.rcsb.org/fasta/entry/{pdb_id}"
-OUT_DIR = "../../data"
+OUT_DIR = "../data"
 SEQ_OUT = f"{OUT_DIR}/pinder_sequences.fasta"
 SPECIES_OUT = f"{OUT_DIR}/pinder_species.tsv"
 GO_OUT = f"{OUT_DIR}/pinder_go_annotations.tsv"
