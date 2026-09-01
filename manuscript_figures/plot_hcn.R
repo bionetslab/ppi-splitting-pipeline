@@ -4,7 +4,7 @@ library(cowplot)
 library(dplyr)
 
 ### Fig. 5a: Random Forest results ####
-core_path <- "/path/to/ppi-splitting-pipeline/results_server/"
+core_path <- "/path/to/ppi-splitting-pipeline/results_esm2/"
 
 path_to_results <- paste0(core_path, "multiqc_non_struc/")
 path_to_hcn_results <- paste0(core_path, "multiqc_hcn/")

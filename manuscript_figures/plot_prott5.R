@@ -3,7 +3,7 @@ library(ggplot2)
 library(dplyr)
 
 core_path <- "/path/to/ppi-splitting-pipeline/results_prott5/"
-core_path_others <- "/path/to/ppi-splitting-pipeline/results_server/"
+core_path_others <- "/path/to/ppi-splitting-pipeline/results_esm2/"
 path_to_prott5_results <- paste0(core_path, "multiqc_prott5/")
 path_to_results <- paste0(core_path_others, "multiqc_non_struc/")
 path_to_struc_results <- paste0(core_path_others, "multiqc_structural/")

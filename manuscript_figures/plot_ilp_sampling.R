@@ -3,7 +3,7 @@ library(ggplot2)
 library(dplyr)
 library(tidyr)
 
-core_path <- "/path/to/ppi-splitting-pipeline/results_server/"
+core_path <- "/path/to/ppi-splitting-pipeline/results_esm2/"
 
 ### Fig 4a: Bias analysis results ####
 
