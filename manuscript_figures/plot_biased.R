@@ -9,7 +9,7 @@ library(cowplot)
 library(gridGraphics)
 library(Matrix)
 
-core_path <- "/path/to/ppi-splitting-pipeline/results_server/"
+core_path <- "/path/to/ppi-splitting-pipeline/results_esm2/"
 path_to_results <- paste0(core_path, "multiqc_non_struc/")
 path_to_struc_results <- paste0(core_path, "multiqc_structural/")
 path_to_pdb_results <- paste0(core_path, "multiqc_PDB/")
@@ -359,7 +359,7 @@ ggsave("figures/fig2d_self_interactions.pdf", width = 9, height = 3.5, dpi = 300
 #### Suppl. Figure: Similarity ####
 
 load_sim <- function(ds) {
-  base <- paste0("~/PythonProjects/ppi-splitting-pipeline/results_server/", ds, "-Leakage-split/")
+  base <- paste0("~/PythonProjects/ppi-splitting-pipeline/results_esm2/", ds, "-Leakage-split/")
   dt <- fread(paste0(base, "similarities/all_vs_all.tsv"), sep="\t")
   colnames(dt) <- c("protein1", "protein2", "evalue", "bitscore", "pident")
   if(!ds %in% c("PDB_dimers", "Pinder")){
@@ -405,7 +405,7 @@ ggsave("figures/fig_similarity.pdf", width = 16, height = 5, dpi = 300)
 
 load_tax <- function(ds) {
   if(!ds %in% c("PDB_dimers", "Pinder")){
-    base <- paste0("~/PythonProjects/ppi-splitting-pipeline/results_server/", ds, "-Leakage-split/")
+    base <- paste0("~/PythonProjects/ppi-splitting-pipeline/results_esm2/", ds, "-Leakage-split/")
     dt <- fread(paste0(base, "data/species.tsv"), sep="\t")
   }else if(ds == "PDB_dimers"){
     dt <- fread("~/PythonProjects/ppi-splitting-pipeline/data/pdb_dimers_species.tsv", sep="\t")

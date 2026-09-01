@@ -5,7 +5,7 @@ library(cowplot)
 library(scales)
 
 report_paths <- c(
-  prott5_run = "/path/to/report-20260818-57891661.html"
+  prott5_run = "/path/to/report-prott5.html"
 )
 
 run_labels <- c(
