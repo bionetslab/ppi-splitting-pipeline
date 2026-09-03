@@ -48,7 +48,7 @@ process SAMPLE_NEGATIVES_ILP {
     def lic_arg  = gurobi_license    ? "--gurobi-license ${gurobi_license}"        : ''
     """
     n_positives=\$(( \$(wc -l < ${positives}) - 1 ))  # -1 for the header row
-    max_candidates=$(( 4 * n_positives ))
+    max_candidates=\$(( 4 * n_positives ))
 
     sample_negatives_ilp.py \\
         --positives          ${positives} \\
