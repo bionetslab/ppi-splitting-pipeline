@@ -1,12 +1,16 @@
 #!/usr/bin/env python3
 """
-Compute per-protein embeddings and save to embeddings.npz.
+Compute protein embeddings and save to embeddings.npz.
 
 --model none     : amino-acid composition (mean-pooled one-hot), 21-dimensional
 --model esm2     : ESM2 650M, mean-pooled over residues (dim 1280)
 --model prot_t5  : ProtT5-XL, mean-pooled over residues (dim 1024)
 
 Each entry in the NPZ file is keyed by protein ID and holds a 1-D float32 array.
+
+--per_residue keeps one embedding per residue instead of mean-pooling: each entry
+is then a 2-D float16 array of shape (L, dim) (needed by the Crossattention
+classifier). The files are about L times larger than the pooled ones.
 """
 
 import argparse
@@ -23,20 +27,27 @@ _AA_VOCAB = "ACDEFGHIKLMNPQRSTVWY"
 _AA_IDX = {aa: i for i, aa in enumerate(_AA_VOCAB)}
 
 
-def embed_one_hot(seqs):
+def embed_one_hot(seqs, per_residue=False):
     dim = len(_AA_VOCAB) + 1  # 20 standard AAs + 1 for unknown/non-standard
     embeddings = {}
     for pid, seq in seqs.items():
-        vec = np.zeros(dim, dtype=np.float32)
-        for aa in seq:
-            vec[_AA_IDX.get(aa, len(_AA_VOCAB))] += 1
-        if seq:
-            vec /= len(seq)
-        embeddings[pid] = vec
+        onehot = np.zeros((len(seq), dim), dtype=np.float32)
+        for pos, aa in enumerate(seq):
+            onehot[pos, _AA_IDX.get(aa, len(_AA_VOCAB))] = 1
+        if per_residue:
+            embeddings[pid] = onehot.astype(np.float16)
+        else:
+            embeddings[pid] = onehot.mean(0) if len(seq) else np.zeros(dim, dtype=np.float32)
     return embeddings
 
 
-def embed_esm2(seqs):
+def _finish(residue_embs, per_residue):
+    """(L, dim) tensor -> per-residue float16 array, or mean-pooled float32 vector."""
+    x = residue_embs.cpu().float()
+    return x.numpy().astype(np.float16) if per_residue else x.mean(0).numpy()
+
+
+def embed_esm2(seqs, per_residue=False):
     import torch
     from transformers import AutoModel, AutoTokenizer
 
@@ -49,14 +60,14 @@ def embed_esm2(seqs):
         inputs = tokenizer(seq, return_tensors="pt", truncation=True, max_length=1024).to(device)
         with torch.no_grad():
             out = model(**inputs)
-        # skip CLS (0) and EOS (-1) tokens, mean-pool the rest
-        embeddings[pid] = out.last_hidden_state[0, 1:-1].mean(0).cpu().float().numpy()
+        # skip CLS (0) and EOS (-1) tokens, mean-pool the rest (or keep all residues)
+        embeddings[pid] = _finish(out.last_hidden_state[0, 1:-1], per_residue)
         if (i + 1) % 50 == 0:
             print(f"  {i + 1}/{len(seqs)} embedded", file=sys.stderr)
     return embeddings
 
 
-def embed_prot_t5(seqs):
+def embed_prot_t5(seqs, per_residue=False):
     import torch
     from transformers import T5EncoderModel, T5Tokenizer
 
@@ -71,7 +82,9 @@ def embed_prot_t5(seqs):
         inputs = tokenizer(seq_fmt, return_tensors="pt", truncation=True, max_length=1024).to(device)
         with torch.no_grad():
             out = model(**inputs)
-        embeddings[pid] = out.last_hidden_state[0].mean(0).cpu().float().numpy()
+        hidden = out.last_hidden_state[0]
+        # the pooled embedding includes the trailing </s> token; per-residue output drops it
+        embeddings[pid] = _finish(hidden[:-1] if per_residue else hidden, per_residue)
         if (i + 1) % 50 == 0:
             print(f"  {i + 1}/{len(seqs)} embedded", file=sys.stderr)
     return embeddings
@@ -81,6 +94,11 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--fasta", nargs="+", required=True)
     ap.add_argument("--model", choices=["none", "esm2", "prot_t5"], default="esm2")
+    ap.add_argument(
+        "--per_residue",
+        action="store_true",
+        help="save one embedding per residue, array (L, dim) float16, instead of the mean-pooled vector",
+    )
     args = ap.parse_args()
 
     seqs = {}
@@ -89,11 +107,11 @@ def main():
     print(f"Embedding {len(seqs)} unique proteins with {args.model}", file=sys.stderr)
 
     if args.model == "none":
-        embeddings = embed_one_hot(seqs)
+        embeddings = embed_one_hot(seqs, args.per_residue)
     elif args.model == "esm2":
-        embeddings = embed_esm2(seqs)
+        embeddings = embed_esm2(seqs, args.per_residue)
     else:
-        embeddings = embed_prot_t5(seqs)
+        embeddings = embed_prot_t5(seqs, args.per_residue)
 
     np.savez("embeddings.npz", **embeddings)
     print(f"Saved {len(embeddings)} embeddings to embeddings.npz", file=sys.stderr)
