@@ -109,9 +109,41 @@ def read_labelled_csv(path):
 
 
 def load_embeddings(path):
-    """Return {protein_id: embedding_array} from an NPZ file."""
+    """Return {protein_id: embedding_array} from an NPZ file (everything is read into memory)."""
     raw = np.load(path, allow_pickle=False)
     return {k: raw[k] for k in raw.files}
+
+
+class LazyArray:
+    """Reference to one array of an NPZ file; the data is read from disk only on np.asarray()."""
+
+    def __init__(self, npz, key, shape):
+        self._npz, self._key, self.shape = npz, key, shape
+
+    def __len__(self):
+        return self.shape[0]
+
+    @property
+    def ndim(self):
+        return len(self.shape)
+
+    def __array__(self, dtype=None, copy=None):
+        a = self._npz[self._key]
+        return a if dtype is None else a.astype(dtype)
+
+
+def load_embeddings_lazy(path):
+    """Like load_embeddings, but returns {protein_id: LazyArray}: only the array shapes (from the
+    .npy headers) are read up front. Use for per-residue embeddings, which can be far bigger than RAM."""
+    npz = np.load(path, allow_pickle=False)
+    out = {}
+    for key in npz.files:
+        with npz.zip.open(key + ".npy") as fh:
+            version = np.lib.format.read_magic(fh)
+            reader = np.lib.format.read_array_header_1_0 if version == (1, 0) else np.lib.format.read_array_header_2_0
+            shape, _, _ = reader(fh)
+        out[key] = LazyArray(npz, key, shape)
+    return out
 
 
 # ---------------------------------------------------------------------------

@@ -23,7 +23,7 @@ import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from models import MODELS, get_model
-from utils import load_embeddings, read_labelled_csv
+from utils import load_embeddings, load_embeddings_lazy, read_labelled_csv
 from sklearn.metrics import (
     accuracy_score,
     average_precision_score,
@@ -51,21 +51,23 @@ def build_X(pairs, labels, embeddings):
     return np.array(rows, dtype=np.float32), np.array(y)
 
 
-def build_pairs(pairs, labels, embeddings, min_len=1):
+def build_pairs(pairs, labels, embeddings, min_len=1, max_len=None):
     """Like build_X, but keep the two per-residue embeddings (L, d) of every pair
-    separate (they have different lengths). Pairs with a missing or too short
-    (< min_len residues) protein are dropped."""
+    separate (they have different lengths). Pairs with a missing protein, or a protein
+    shorter than min_len / longer than max_len residues, are dropped."""
     rows, y = [], []
     skipped = 0
     for (p1, p2), label in zip(pairs, labels):
         a, b = (p1, p2) if p1 <= p2 else (p2, p1)
-        if a in embeddings and b in embeddings and len(embeddings[a]) >= min_len and len(embeddings[b]) >= min_len:
+        if a in embeddings and b in embeddings and all(
+            len(embeddings[p]) >= min_len and (max_len is None or len(embeddings[p]) <= max_len) for p in (a, b)
+        ):
             rows.append((embeddings[a], embeddings[b]))
             y.append(label)
         else:
             skipped += 1
     if skipped:
-        print(f"  skipped {skipped} pairs with missing or too short embeddings", file=sys.stderr)
+        print(f"  skipped {skipped} pairs with missing embeddings or protein length outside [{min_len}, {max_len}]", file=sys.stderr)
     return rows, np.array(y)
 
 
@@ -126,18 +128,19 @@ def main():
     ap.add_argument("--model", default="RFC", choices=MODELS, help="Classifier to train (default: RFC)")
     args = ap.parse_args()
 
+    model = get_model(args.model, seed=args.seed)
     print("Loading embeddings ...", file=sys.stderr)
-    embeddings = load_embeddings(args.embeddings)
+    # per-residue embeddings are read from disk on demand (they do not fit in memory)
+    embeddings = load_embeddings_lazy(args.embeddings) if model.per_residue else load_embeddings(args.embeddings)
     print(f"  {len(embeddings)} proteins", file=sys.stderr)
 
-    model = get_model(args.model, seed=args.seed)
     if model.per_residue:
         bad = [k for k, v in embeddings.items() if v.ndim != 2]
         if bad:
             sys.exit(f"{args.model} needs per-residue embeddings (L, d) per protein; got 1-D vectors, e.g. {bad[0]}")
 
         def build(pairs, labels):
-            return build_pairs(pairs, labels, embeddings, model.min_len)
+            return build_pairs(pairs, labels, embeddings, model.min_len, model.max_len)
     else:
 
         def build(pairs, labels):

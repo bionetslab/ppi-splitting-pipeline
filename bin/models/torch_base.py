@@ -2,6 +2,7 @@
 
 import copy
 import sys
+import time
 
 import numpy as np
 import torch
@@ -9,8 +10,17 @@ import torch.nn as nn
 from sklearn.metrics import roc_auc_score
 
 
+def _fmt(seconds):
+    seconds = int(seconds)
+    return f"{seconds // 3600}:{seconds % 3600 // 60:02d}:{seconds % 60:02d}"
+
+
 def get_device():
-    return torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    if torch.cuda.is_available():
+        return torch.device("cuda")
+    if torch.backends.mps.is_available():  # Apple silicon GPU
+        return torch.device("mps")
+    return torch.device("cpu")
 
 
 class TorchClassifier:
@@ -23,6 +33,7 @@ class TorchClassifier:
 
     per_residue = False  # True: model needs per-residue embeddings (see train_classifier.build_pairs)
     min_len = 1          # shortest per-residue sequence the model can handle
+    max_len = None       # longest per-residue sequence; pairs with longer proteins are dropped
     eval_batch_size = 4096
 
     description = ""
@@ -30,6 +41,10 @@ class TorchClassifier:
     batch_size = 256
     num_epochs = 25
     patience = 8  # epochs without val-AUROC improvement before stopping
+    # fraction of the training pairs drawn per epoch. 1.0 = every pair once per epoch (random order);
+    # < 1 = random draw with replacement of int(n * subset_size) pairs, as in PPI_prediction_study
+    subset_size = 1.0
+    log_every = None  # if set: print progress (batches, loss, speed, ETA) every this many seconds within an epoch
 
     def __init__(self, seed=42):
         self.seed = seed
@@ -54,6 +69,7 @@ class TorchClassifier:
         np.random.seed(self.seed)
         Xt, Xv = self._prepare(X_train), self._prepare(X_val)
         yt = torch.as_tensor(np.asarray(y_train), dtype=torch.float32)
+        print(f"Using device: {self.device}", file=sys.stderr)
         self.net = self.build_net(self._embed_dim(Xt)).to(self.device)
         opt = torch.optim.Adam(self.net.parameters(), lr=self.lr)
         loss_fn = nn.BCELoss()
@@ -61,9 +77,14 @@ class TorchClassifier:
         best_auroc, best_state, stale = -1.0, None, 0
         for epoch in range(self.num_epochs):
             self.net.train()
-            perm = torch.randperm(len(Xt))
-            total = 0.0
-            for i in range(0, len(Xt), self.batch_size):
+            n_epoch = int(len(Xt) * self.subset_size)
+            if self.subset_size < 1.0:
+                perm = torch.randint(len(Xt), (n_epoch,))
+            else:
+                perm = torch.randperm(len(Xt))
+            total, seen = 0.0, 0
+            t_start = t_last = time.time()
+            for i in range(0, n_epoch, self.batch_size):
                 idx = perm[i : i + self.batch_size]
                 if len(idx) < 2:  # BatchNorm cannot handle a batch of one
                     continue
@@ -73,9 +94,21 @@ class TorchClassifier:
                 loss.backward()
                 opt.step()
                 total += loss.item() * len(idx)
+                seen += len(idx)
+                if self.log_every and time.time() - t_last >= self.log_every:
+                    t_last = time.time()
+                    rate = seen / (t_last - t_start)
+                    print(
+                        f"    epoch {epoch + 1}: {seen}/{n_epoch} pairs ({seen / n_epoch:.0%})  "
+                        f"loss {total / seen:.4f}  {rate:.1f} pairs/s  "
+                        f"elapsed {_fmt(t_last - t_start)}  ETA {_fmt((n_epoch - seen) / rate)}",
+                        file=sys.stderr,
+                    )
+            if self.log_every:
+                print(f"    epoch {epoch + 1} training took {_fmt(time.time() - t_start)}; validating ...", file=sys.stderr)
             val_auroc = roc_auc_score(y_val, self._predict(Xv))
             print(
-                f"  epoch {epoch + 1}/{self.num_epochs}  loss {total / len(Xt):.4f}  val AUROC {val_auroc:.4f}",
+                f"  epoch {epoch + 1}/{self.num_epochs}  loss {total / n_epoch:.4f}  val AUROC {val_auroc:.4f}",
                 file=sys.stderr,
             )
             if val_auroc > best_auroc:
@@ -93,10 +126,12 @@ class TorchClassifier:
     def _predict(self, X):
         self.net.eval()
         bs = self.eval_batch_size
-        out = [
-            self.net(self._batch(X, torch.arange(i, min(i + bs, len(X))))).cpu()
-            for i in range(0, len(X), bs)
-        ]
+        out, t_last = [], time.time()
+        for i in range(0, len(X), bs):
+            out.append(self.net(self._batch(X, torch.arange(i, min(i + bs, len(X))))).cpu())
+            if self.log_every and time.time() - t_last >= self.log_every:
+                t_last = time.time()
+                print(f"    predicted {min(i + bs, len(X))}/{len(X)} pairs", file=sys.stderr)
         return torch.cat(out).numpy()
 
     def predict_proba(self, X):

@@ -10,8 +10,9 @@ map, convolved, pooled, and reduced by a max to one probability.
 As in the original, every pair is processed on its own (lengths differ), and a
 mini-batch is the stack of its per-pair predictions. Hyperparameters follow the
 repo's best "crossattention" config (lr 1e-4, batch size 16, dropout 0.1,
-8 heads, h3 64, ff_dim 256, avg pooling, kernel 3, max_seq_len 1000,
-early stopping patience 8, up to 25 epochs).
+8 heads, h3 64, ff_dim 256, avg pooling, kernel 3, max_seq_len 1000, subset_size 0.5,
+early stopping patience 8, up to 25 epochs). As in the original, pairs where either
+protein has more than max_len (1000) residues are dropped (not truncated).
 """
 
 import numpy as np
@@ -21,8 +22,6 @@ import torch.nn.functional as F
 from torch.nn.utils.parametrizations import spectral_norm
 
 from .torch_base import TorchClassifier
-
-MAX_SEQ_LEN = 1000
 
 
 class Attention(nn.Module):
@@ -131,9 +130,12 @@ class CrossAttentionClassifier(TorchClassifier):
     )
     lr = 1e-4
     batch_size = 16
+    log_every = 30  # seconds between progress lines (an epoch takes very long)
+    subset_size = 0.1  # as in the original: each epoch draws half of the training pairs (with replacement)
     eval_batch_size = 16
     per_residue = True
     min_len = 3  # the 3x3 average pooling needs an interaction map of at least 3x3
+    max_len = 1000  # original max_seq_len: longer pairs are dropped
 
     def _embed_dim(self, Xp):
         return Xp[0][0].shape[-1]
@@ -143,7 +145,7 @@ class CrossAttentionClassifier(TorchClassifier):
 
     def _batch(self, Xp, idx):
         def to_t(a):
-            return torch.as_tensor(np.asarray(a)[:MAX_SEQ_LEN], dtype=torch.float32, device=self.device)
+            return torch.as_tensor(np.asarray(a), dtype=torch.float32, device=self.device)
 
         return [(to_t(Xp[i][0]), to_t(Xp[i][1])) for i in idx.tolist()]
 

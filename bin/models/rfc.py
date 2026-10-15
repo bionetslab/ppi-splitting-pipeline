@@ -23,6 +23,10 @@ class RFCClassifier:
         "(3 configs: max_depth 5/10/30, max_samples 0.2), then retrained on train+val."
     )
 
+    per_residue = False  # works on pooled per-protein embeddings
+    min_len = 1
+    max_len = None
+
     def __init__(self, seed=42):
         self.seed = seed
         self.clf = None
