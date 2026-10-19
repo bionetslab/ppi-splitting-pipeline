@@ -10,7 +10,7 @@ Models (--model, definitions in bin/models/):
   RFC (default)   RandomForest. 3 pre-defined configs (max_depth 5/10/30,
                   max_samples 0.2) evaluated by AUROC on val set; the best
                   config is retrained on train+val.
-  Crossattention  cross-attention network (PPI_prediction_study); needs
+  TUnA            transformer-encoder network (PPI_prediction_study); needs
                   per-residue embeddings, i.e. an (L, d) array per protein in the NPZ
   Richoux-like    fully connected two-tower network (Richoux et al.)
 """
@@ -116,6 +116,50 @@ def write_mqc(results, id_, model_name, description):
             fh.write(f"{id_}\t{id_}\t{row}\n")
 
 
+def train_and_evaluate(model_name, train_path, val_path, test_balanced_path, test_realistic_path, embeddings_path, seed=42):
+    """Train model_name and return [(test_name, metrics_dict), ...] for both test sets."""
+    model = get_model(model_name, seed=seed)
+    print("Loading embeddings ...", file=sys.stderr)
+    # per-residue embeddings are read from disk on demand (they do not fit in memory)
+    embeddings = load_embeddings_lazy(embeddings_path) if model.per_residue else load_embeddings(embeddings_path)
+    print(f"  {len(embeddings)} proteins", file=sys.stderr)
+
+    if model.per_residue:
+        bad = [k for k, v in embeddings.items() if v.ndim != 2]
+        if bad:
+            sys.exit(f"{model_name} needs per-residue embeddings (L, d) per protein; got 1-D vectors, e.g. {bad[0]}")
+
+        def build(pairs, labels):
+            return build_pairs(pairs, labels, embeddings, model.min_len, model.max_len)
+    else:
+
+        def build(pairs, labels):
+            return build_X(pairs, labels, embeddings)
+
+    train_pairs, y_train = read_labelled_csv(train_path)
+    val_pairs, y_val = read_labelled_csv(val_path)
+    X_train, y_train = build(train_pairs, y_train)
+    X_val, y_val = build(val_pairs, y_val)
+
+    print(f"Training {model_name} ...", file=sys.stderr)
+    model.fit(X_train, y_train, X_val, y_val)
+
+    # Evaluate on both test sets
+    results = []
+    for name, path in [("test_balanced", test_balanced_path), ("test_realistic", test_realistic_path)]:
+        pairs, y_test_raw = read_labelled_csv(path)
+        X_test, y_test = build(pairs, y_test_raw)
+        y_prob = model.predict_proba(X_test)
+        metrics = compute_metrics(y_test, y_prob)
+        results.append((name, metrics))
+        print(
+            f"{name}: " + "  ".join(f"{k}={v:.4f}" for k, v in metrics.items()),
+            file=sys.stderr,
+        )
+
+    return results
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--train", required=True)
@@ -128,45 +172,9 @@ def main():
     ap.add_argument("--model", default="RFC", choices=MODELS, help="Classifier to train (default: RFC)")
     args = ap.parse_args()
 
-    model = get_model(args.model, seed=args.seed)
-    print("Loading embeddings ...", file=sys.stderr)
-    # per-residue embeddings are read from disk on demand (they do not fit in memory)
-    embeddings = load_embeddings_lazy(args.embeddings) if model.per_residue else load_embeddings(args.embeddings)
-    print(f"  {len(embeddings)} proteins", file=sys.stderr)
-
-    if model.per_residue:
-        bad = [k for k, v in embeddings.items() if v.ndim != 2]
-        if bad:
-            sys.exit(f"{args.model} needs per-residue embeddings (L, d) per protein; got 1-D vectors, e.g. {bad[0]}")
-
-        def build(pairs, labels):
-            return build_pairs(pairs, labels, embeddings, model.min_len, model.max_len)
-    else:
-
-        def build(pairs, labels):
-            return build_X(pairs, labels, embeddings)
-
-    train_pairs, y_train = read_labelled_csv(args.train)
-    val_pairs, y_val = read_labelled_csv(args.val)
-    X_train, y_train = build(train_pairs, y_train)
-    X_val, y_val = build(val_pairs, y_val)
-
-    print(f"Training {args.model} ...", file=sys.stderr)
-    model.fit(X_train, y_train, X_val, y_val)
-
-    # Evaluate on both test sets
-    results = []
-    for name, path in [("test_balanced", args.test_balanced), ("test_realistic", args.test_realistic)]:
-        pairs, y_test_raw = read_labelled_csv(path)
-        X_test, y_test = build(pairs, y_test_raw)
-        y_prob = model.predict_proba(X_test)
-        metrics = compute_metrics(y_test, y_prob)
-        results.append((name, metrics))
-        print(
-            f"{name}: " + "  ".join(f"{k}={v:.4f}" for k, v in metrics.items()),
-            file=sys.stderr,
-        )
-
+    results = train_and_evaluate(
+        args.model, args.train, args.val, args.test_balanced, args.test_realistic, args.embeddings, args.seed
+    )
     #write_mqc(results, args.id, args.model, model.description)
     print(results)
 

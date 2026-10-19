@@ -9,7 +9,7 @@ Compute protein embeddings and save to embeddings.npz.
 Each entry in the NPZ file is keyed by protein ID and holds a 1-D float32 array.
 
 --per_residue keeps one embedding per residue instead of mean-pooling: each entry
-is then a 2-D float16 array of shape (L, dim) (needed by the Crossattention
+is then a 2-D float16 array of shape (L, dim) (needed by the TUnA
 classifier). The files are about L times larger than the pooled ones.
 """
 
