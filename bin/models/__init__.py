@@ -12,12 +12,14 @@ of the two (ID-sorted) protein embeddings, i.e. shape (n_pairs, 2 * embed_dim).
 Models are imported lazily so that RFC runs do not need to import torch.
 """
 
-MODELS = ("RFC", "TUnA", "Richoux-like")
+MODELS = ("RFC", "XGBoost", "TUnA", "Richoux-like")
 
 
 def get_model(name, seed=42):
     if name == "RFC":
         from .rfc import RFCClassifier as cls
+    elif name == "XGBoost":
+        from .xgb import XGBoostClassifier as cls
     elif name == "TUnA":
         from .tuna import TUnAClassifier as cls
     elif name == "Richoux-like":

@@ -10,6 +10,8 @@ Models (--model, definitions in bin/models/):
   RFC (default)   RandomForest. 3 pre-defined configs (max_depth 5/10/30,
                   max_samples 0.2) evaluated by AUROC on val set; the best
                   config is retrained on train+val.
+  XGBoost         gradient-boosted trees. 3 configs (max_depth 3/6/10) with early
+                  stopping on val AUROC; the best is retrained on train+val.
   TUnA            transformer-encoder network (PPI_prediction_study); needs
                   per-residue embeddings, i.e. an (L, d) array per protein in the NPZ
   Richoux-like    fully connected two-tower network (Richoux et al.)

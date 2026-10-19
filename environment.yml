@@ -11,6 +11,7 @@ dependencies:
   - kahip
   - multiqc
   - scikit-learn
+  - xgboost
   - numpy
   - matplotlib
   - plotly
