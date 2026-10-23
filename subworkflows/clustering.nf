@@ -1,4 +1,5 @@
 include { RUN_BLAST; MAKE_METIS; RUN_KAHIP } from '../processes/clustering'
+include { expandSeeds } from '../functions/seeds'
 
 // Builds the protein similarity graph (BLAST all-vs-all -> METIS graph) and
 // partitions it with KaHIP, ready for SPLIT_POSITIVES. Each dataset can
@@ -30,18 +31,21 @@ workflow CLUSTERING {
 
     metis_out = MAKE_METIS(metis_branched.needs_partition)
 
+    // BLAST/METIS are seed-independent and run once per dataset; KaHIP runs
+    // once per split seed, so partition/node_mapping carry meta.split_seed
+    // while blast_out doesn't.
     // The ILP splitter clusters proteins into many small KaHIP partitions
     // first, whereas the default splitter partitions straight into train/val/test.
-    kahip_inputs = metis_out.graph.map { meta, graph ->
+    kahip_inputs = expandSeeds(metis_out.graph, ['split']).map { meta, graph ->
         def k = (meta.split_method == "ilp") ? meta.ilp_kahip_k : meta.kahip_k
         tuple(meta, graph, k)
     }
     kahip_out = RUN_KAHIP(kahip_inputs)
 
-    skipped = metis_branched.skip_partition.map { meta -> tuple(meta, []) }
+    skipped = expandSeeds(metis_branched.skip_partition.map { meta -> tuple(meta, []) }, ['split'])
 
     emit:
     blast_out    = blast_out
-    node_mapping = metis_out.node_mapping.mix(skipped)
+    node_mapping = expandSeeds(metis_out.node_mapping, ['split']).mix(skipped)
     partition    = kahip_out.mix(skipped)
 }

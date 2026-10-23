@@ -63,7 +63,20 @@ def build_matrices(clusters_list, protein_to_cluster, ppi_rows):
     return cross_ppi, intra_ppi
 
 
-def solve_ilp(clusters_list, intra_ppi, cross_ppi, splits, names, epsilon, max_sec, solver):
+def _solver_seed_options(solver, seed):
+    """Solver-specific option that seeds the MIP search (mirrors sample_negatives_ilp.py's _solver_options)."""
+    name = (solver or "").upper()
+    if name == cp.GUROBI:
+        return {"Seed": seed}
+    if name == cp.HIGHS:
+        return {"random_seed": seed}
+    if name == cp.SCIP:
+        return {"scip_params": {"randomization/randomseedshift": seed}}
+    print(f"Solver {solver or 'auto'} is not seeded; --seed has no effect.", file=sys.stderr)
+    return {}
+
+
+def solve_ilp(clusters_list, intra_ppi, cross_ppi, splits, names, epsilon, max_sec, solver, seed):
     """
     Variables: x[s, c] ∈ {0,1}  — cluster c assigned to split s.
 
@@ -134,7 +147,7 @@ def solve_ilp(clusters_list, intra_ppi, cross_ppi, splits, names, epsilon, max_s
 
     problem = cp.Problem(objective, constraints)
 
-    kwargs = dict(time_limit=max_sec, verbose=True)
+    kwargs = dict(time_limit=max_sec, verbose=True, **_solver_seed_options(solver, seed))
     if solver:
         problem.solve(solver=solver, **kwargs)
     else:
@@ -172,6 +185,7 @@ def main():
     )
     ap.add_argument("--max-sec", type=int, default=300, help="ILP solver time limit in seconds (default 300)")
     ap.add_argument("--solver", default=None, help="CVXPY solver name, e.g. SCIP, GLPK_MI (default: auto)")
+    ap.add_argument("--seed", type=int, default=1234, help="Solver random seed (GUROBI, HIGHS, SCIP only)")
     args = ap.parse_args()
 
     splits = [args.train_split, args.val_split, args.test_split]
@@ -219,6 +233,7 @@ def main():
         args.epsilon,
         args.max_sec,
         args.solver,
+        args.seed,
     )
     if assignment is None:
         print("ILP did not find a feasible solution.", file=sys.stderr)
