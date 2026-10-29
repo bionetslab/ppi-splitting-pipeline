@@ -170,6 +170,18 @@ def topology_shortcut(pairs, train_degree_ratio):
     return np.array(A, dtype=np.float32)
 
 
+# sklearn's kNN MI estimator ignores every sample whose class has only one member.
+MIN_PER_CLASS = 2
+
+
+def smallest_class(y):
+    """Size of the least-populated label in y; 0 if fewer than two labels are present."""
+    counts = np.unique(y, return_counts=True)[1]
+    if len(counts) < 2:
+        return 0
+    return int(np.min(counts))
+
+
 def _prepare_split(pairs, y, embeddings):
     """Return (X, filtered_pairs, filtered_y) keeping only pairs with embeddings."""
     X, mask = build_pair_X(pairs, embeddings)
@@ -327,6 +339,17 @@ def main():
                 print(f"  {split}: 0 pairs qualify for topology_shortcut (no training overlap)", file=sys.stderr)
                 continue
 
+        # Below MIN_PER_CLASS sklearn drops the class, and raises if that empties the array.
+        # Checked after the topology_shortcut filter, which drops rows of its own.
+        if smallest_class(y_f) < MIN_PER_CLASS:
+            counts = ", ".join(f"{int(c)}x label {int(v)}" for v, c in zip(*np.unique(y_f, return_counts=True)))
+            print(
+                f"  {split}: {X.shape[0]} pairs but only {counts} -- fewer than {MIN_PER_CLASS} in a "
+                "class, skipping this split",
+                file=sys.stderr,
+            )
+            continue
+
         print(f"  {X.shape[0]} {split} pairs retained", file=sys.stderr)
         r = analyse(A, X, y_f, args.attribute, seed=args.seed)
         results.append((split, r))
@@ -341,6 +364,12 @@ def main():
         )
     elif results:
         write_mqc(args.attribute, results)
+    else:
+        # Every split was skipped; say so, so a missing section is not read as a measured zero.
+        print(
+            f"  {args.attribute}: no split had enough labelled pairs to analyse -- skipping output.",
+            file=sys.stderr,
+        )
 
 
 if __name__ == "__main__":

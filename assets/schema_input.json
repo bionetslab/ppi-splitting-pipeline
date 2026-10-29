@@ -51,7 +51,7 @@
         "format": "file-path",
         "exists": true,
         "errorMessage": "If supplied, must be a path to a csv containing scores for negative candidates with columns protein1,protein2,w",
-        "pattern": "^*\\.csv$"
+        "pattern": "^.*\\.csv$"
       },
       "partition": {
         "type": "string",
