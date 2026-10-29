@@ -1,0 +1,6 @@
+id,ppis,candidate_network,embedding_model,split_method,ilp_kahip_k,ilp_max_sec,neg_ilp_time_limit,negative_sampling_method,neg_ilp_lambda_degree,neg_ilp_lambda_taxon_pair,neg_ilp_lambda_self_loop
+DDI_Blackbox_split,data/test_ddis.csv,,none,,,60,60,,,,
+DDI_ILP_split,data/test_ddis.csv,,none,ilp,10,60,60,,,,
+DDI_ILP_split_and_sampling,data/test_ddis.csv,,none,ilp,100,60,60,ilp,4.0,4.0,0.02
+DDI_Leakage_split,data/test_ddis.csv,,none,random,,60,60,uniform,,,
+DDI_ILP_two_negsets,data/test_ddis.csv,data/test_ddi_candidates.csv,none,ilp,100,60,60,"ilp,ilp_candidates",4.0,4.0,0.02
