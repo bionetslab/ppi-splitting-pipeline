@@ -1,3 +1,5 @@
+include { mqcLabel } from '../helpers/mqc_labels'
+
 // Datasets requesting the same embedding_model share one embedding call over
 // the union of their train/val/test sequences, avoiding recomputation for
 // proteins in more than one dataset. stageAs auto-numbers fasta_files since
@@ -23,16 +25,17 @@ process EMBED_SEQUENCES {
 }
 
 process TRAIN_CLASSIFIER {
-    tag "${meta.id}"
+    tag "${mqcLabel(meta, negset)}"
     label 'error_retry'
 
     input:
-    tuple val(meta), path(train_csv), path(val_csv), path(test_balanced_csv), path(test_realistic_csv), path(embeddings)
+    tuple val(meta), val(negset), path(train_csv), path(val_csv), path(test_balanced_csv), path(test_realistic_csv), path(embeddings)
 
     output:
     tuple val(meta), path("classifier_metrics_*_mqc.tsv"), emit: mqc
 
     script:
+    def mqc_id = mqcLabel(meta, negset)
     """
     train_classifier.py \\
         --train          ${train_csv} \\
@@ -41,6 +44,6 @@ process TRAIN_CLASSIFIER {
         --test_realistic ${test_realistic_csv} \\
         --embeddings     ${embeddings} \\
         --seed           ${params.seed} \\
-        --id             ${meta.id}
+        --id             ${mqc_id}
     """
 }
