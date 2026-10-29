@@ -72,4 +72,5 @@ workflow SAMPLE_NEGATIVES {
     test_balanced  = neg_branched.test_balanced.map  { meta, label, f -> tuple(meta, f) }
     test_realistic = neg_branched.test_realistic.map { meta, label, f -> tuple(meta, f) }
     mqc            = neg_mqc
+    labelled       = neg_labelled  // tuple(meta, label, csv)
 }

@@ -77,8 +77,8 @@ process MULTIQC {
     path multiqc_files, stageAs: "?/*"
 
     output:
-    path "multiqc_report.html"
-    path "multiqc_report_data"
+    path "multiqc_report.html", emit: report
+    path "multiqc_report_data", emit: data
 
     script:
     """

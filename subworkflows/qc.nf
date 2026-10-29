@@ -42,5 +42,8 @@ workflow QC {
         .map { id, f -> f }
         .collect()
 
-    MULTIQC(mqc_files)
+    multiqc = MULTIQC(mqc_files)
+
+    emit:
+    multiqc_report = multiqc.report
 }

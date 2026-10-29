@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "PPI splitting pipeline samplesheet schema",
-  "description": "One row per PPI dataset. Only 'id' and 'ppis' are required; every other column may be left blank to fall back to the corresponding value in nextflow.config.",
+  "description": "One row per PPI dataset. Only 'id' and 'ppis' are required ('ppis' not under --bias_only); every other column may be left blank to fall back to the corresponding value in conf/params.config.",
   "type": "array",
   "items": {
     "type": "object",
