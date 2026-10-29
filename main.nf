@@ -15,6 +15,14 @@ def isGiven(v) {
     !(v == null || v == [])
 }
 
+// val or test may be 0, but not both; train never.
+def checkSplitFractions(meta) {
+    def (train, val, test) = [meta.train_split, meta.val_split, meta.test_split].collect { it.toString().toBigDecimal() }
+    if (train == 0 || (val == 0 && test == 0) || (train + val + test - 1).abs() > 1e-6) {
+        error("Dataset '${meta.id}': train_split=${train}, val_split=${val}, test_split=${test} -- train_split must be > 0, val_split and test_split must not both be 0, and the three must sum to 1.")
+    }
+}
+
 // One row per PPI dataset. Anything left blank in the samplesheet falls back to the corresponding default in
 // nextflow.config, so a single run can process several datasets in parallel, each with its own overrides.
 def buildDatasetsChannel() {
@@ -84,6 +92,9 @@ def buildDatasetsChannel() {
             neg_ilp_lambda_self_loop : isGiven(row.neg_ilp_lambda_self_loop)  ? row.neg_ilp_lambda_self_loop  : params.neg_ilp_lambda_self_loop,
             neg_ilp_lambda_jaccard   : isGiven(row.neg_ilp_lambda_jaccard)    ? row.neg_ilp_lambda_jaccard    : params.neg_ilp_lambda_jaccard,
         ]
+        if (!params.bias_only) {
+            checkSplitFractions(meta)
+        }
         tuple(meta,
             row.ppis              ? file(row.ppis,              checkIfExists: true) : [],
             row.sequences         ? file(row.sequences,         checkIfExists: true) : [],
