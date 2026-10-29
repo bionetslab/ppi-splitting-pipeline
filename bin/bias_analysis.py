@@ -326,6 +326,12 @@ def main():
     for split, path in split_paths:
         pairs, y = read_labelled_csv(path)
         X, pairs_f, y_f = _prepare_split(pairs, y, embeddings)
+
+        # A split can be empty (a 0 split fraction, or no pair with embeddings).
+        if X.shape[0] == 0:
+            print(f"  {split}: 0 pairs with embeddings -- skipping", file=sys.stderr)
+            continue
+
         A = compute(pairs_f, blast_sim, embeddings, go_anns, species, train_degree_ratio)
 
         if args.attribute == "topology_shortcut":

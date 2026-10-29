@@ -63,7 +63,19 @@ def build_matrices(clusters_list, protein_to_cluster, ppi_rows):
     return cross_ppi, intra_ppi
 
 
-def solve_ilp(clusters_list, intra_ppi, cross_ppi, splits, names, epsilon, max_sec, solver):
+def _solver_options(solver, seed, max_sec):
+    """Solver-specific time-limit and seed options; {} for an unknown solver (case-insensitive)."""
+    solver = (solver or "").upper()
+    if solver == cp.GUROBI:
+        return {"TimeLimit": max_sec, "Seed": seed}
+    if solver == cp.HIGHS:
+        return {"time_limit": max_sec, "random_seed": seed}
+    if solver == cp.SCIP:
+        return {"scip_params": {"limits/time": max_sec, "randomization/randomseedshift": seed}}
+    return {}
+
+
+def solve_ilp(clusters_list, intra_ppi, cross_ppi, splits, names, epsilon, max_sec, solver, seed):
     """
     Variables: x[s, c] ∈ {0,1}  — cluster c assigned to split s.
 
@@ -81,6 +93,12 @@ def solve_ilp(clusters_list, intra_ppi, cross_ppi, splits, names, epsilon, max_s
     Objective (minimize): the data loss, i.e., PPIs between clusters assigned to different splits.
         min_X Σ_{i=1}^{n-1}Σ_{j=i+1}^{n} k(c_i,c_j) * (1 - Σ_{s=1}^S x[s,c_i] * x[s,c_j])
     """
+    # Constraint 3 does not keep a fraction-0 split empty, so drop such splits from the
+    # model; main() still writes their (empty) csv/fasta.
+    active = [s for s, frac in enumerate(splits) if frac > 0]
+    splits = [splits[s] for s in active]
+    names = [names[s] for s in active]
+
     n_splits = len(splits)
     n_clusters = len(clusters_list)
 
@@ -134,11 +152,22 @@ def solve_ilp(clusters_list, intra_ppi, cross_ppi, splits, names, epsilon, max_s
 
     problem = cp.Problem(objective, constraints)
 
-    kwargs = dict(time_limit=max_sec, verbose=True)
     if solver:
-        problem.solve(solver=solver, **kwargs)
+        solver_opts = _solver_options(solver, seed, max_sec)
+        if not solver_opts:
+            print(
+                f"Warning: no known options for solver {solver}; time limit passed as time_limit, "
+                f"tie-breaking unseeded.",
+                file=sys.stderr,
+            )
+            solver_opts = {"time_limit": max_sec}
+        problem.solve(solver=solver, verbose=True, **solver_opts)
     else:
-        problem.solve(**kwargs)
+        print(
+            "Warning: no --solver given, so the solve is unseeded; pass --solver for a reproducible split.",
+            file=sys.stderr,
+        )
+        problem.solve(time_limit=max_sec, verbose=True)
 
     if problem.status not in cp.settings.SOLUTION_PRESENT:
         print(f"Solver status: {problem.status}", file=sys.stderr)
@@ -176,6 +205,7 @@ def main():
     )
     ap.add_argument("--max-sec", type=int, default=300, help="ILP solver time limit in seconds (default 300)")
     ap.add_argument("--solver", default=None, help="CVXPY solver name, e.g. SCIP, GLPK_MI (default: auto)")
+    ap.add_argument("--seed", type=int, default=42, help="solver tie-breaking seed (default 42)")
     args = ap.parse_args()
 
     splits = [args.train_split, args.val_split, args.test_split]
@@ -223,6 +253,7 @@ def main():
         args.epsilon,
         args.max_sec,
         args.solver,
+        args.seed,
     )
     if assignment is None:
         print("ILP did not find a feasible solution.", file=sys.stderr)

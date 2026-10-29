@@ -121,15 +121,20 @@ def load_embeddings(path):
 # MultiQC sorts rows alphabetically by Sample name, so a plain f"{id}_{split}"
 # would show test_balanced, test_realistic, train, val. This numeric prefix
 # forces train/val/test/test_balanced/test_realistic order per dataset.
-SPLIT_SORT_KEY = {"train": 1, "val": 2, "test": 3, "test_balanced": 4, "test_realistic": 5, "discarded": 6}
+SPLIT_ORDER = ["train", "val", "test", "test_balanced", "test_realistic", "discarded"]
 
 
-def mqc_sample(id_, split):
+def mqc_sample(label, split):
     """Build a MultiQC Sample name for one dataset+split that sorts correctly."""
-    return f"{id_}_{SPLIT_SORT_KEY.get(split, 9)}_{split}"
+    return f"{label}_{SPLIT_ORDER.index(split) + 1}_{split}"
+
+
+def mqc_dataset(label):
+    """Build a MultiQC Sample name for a row that covers a whole dataset."""
+    return label
 
 
 def mqc_category(name):
     """Same sort-key prefix as mqc_sample, for bar-chart categories that are
     already scoped to one dataset's own chart (no id_ qualification needed)."""
-    return f"{SPLIT_SORT_KEY.get(name, 9)}_{name}"
+    return f"{SPLIT_ORDER.index(name) + 1}_{name}"

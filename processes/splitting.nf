@@ -1,3 +1,6 @@
+include { mqcRowLabel } from '../helpers/mqc_labels'
+
+// --id takes the row's MultiQC display label; publishDir paths still use meta.id.
 process SORT_PPIS {
     tag "${meta.id}"
 
@@ -51,7 +54,7 @@ process SPLIT_RANDOM {
         --val-split   ${meta.val_split} \\
         --test-split  ${meta.test_split} \\
         --seed        ${params.seed} \\
-        --id          ${meta.id}
+        --id          ${mqcRowLabel(meta)}
     """
 }
 
@@ -65,15 +68,21 @@ process CDHIT2D {
     tuple val(meta), val(label), path("cdhit.out"), emit: sim
 
     script:
+    // cd-hit-2d fails on an empty input (a split fraction of 0); an empty
+    // cdhit.out means "no redundancy" and keeps the dataset in the join.
     """
-    cd-hit-2d \\
-        -i  ${db1_fasta} \\
-        -i2 ${db2_fasta} \\
-        -o  cdhit.out \\
-        -c  ${meta.cdhit_identity} \\
-        -n  ${meta.cdhit_wordsize} \\
-        -T  ${task.cpus} \\
-        -M  4000
+    if [ -s ${db1_fasta} ] && [ -s ${db2_fasta} ]; then
+        cd-hit-2d \\
+            -i  ${db1_fasta} \\
+            -i2 ${db2_fasta} \\
+            -o  cdhit.out \\
+            -c  ${meta.cdhit_identity} \\
+            -n  ${meta.cdhit_wordsize} \\
+            -T  ${task.cpus} \\
+            -M  4000
+    else
+        touch cdhit.out
+    fi
     """
 }
 
@@ -109,6 +118,7 @@ process SOLVE_ILP {
         --test-split  ${meta.test_split} \\
         --epsilon     ${meta.ilp_epsilon} \\
         --max-sec     ${meta.ilp_max_sec} \\
+        --seed        ${params.seed} \\
         ${params.ilp_solver ? "--solver ${params.ilp_solver}" : ""}
     """
 }
@@ -145,6 +155,6 @@ process REMOVE_REDUNDANT {
         --test_fasta     ${test_fasta} \\
         --sim_train_val  ${sim_train_val} \\
         --sim_train_test ${sim_train_test} \\
-        --id             ${meta.id}
+        --id             ${mqcRowLabel(meta)}
     """
 }

@@ -1,15 +1,17 @@
+// One task per (dataset, attribute, negative set).
 process BIAS_ANALYSIS {
-    publishDir(path: { "${params.outdir}/${meta.id}/multiqc" }, mode: 'copy')
-    tag "${meta.id}_${attribute}"
+    // Per negative set: the filename carries no set name.
+    publishDir(path: { "${params.outdir}/${meta.id}/bias/${negset}" }, mode: 'copy')
+    tag "${meta.id}_${negset}_${attribute}"
     label 'error_retry'
 
     input:
-    tuple val(meta), val(attribute),
+    tuple val(meta), val(attribute), val(negset),
           path(train_csv), path(val_csv), path(test_balanced_csv), path(test_realistic_csv),
           path(blast_tsv), path(embeddings), path(go_annotations), path(species)
 
     output:
-    tuple val(meta), path("*_bias_mqc.tsv"), emit: mqc, optional: true
+    tuple val(meta), val(negset), path("*_bias_mqc.tsv"), emit: mqc, optional: true
 
     script:
     """
@@ -27,6 +29,7 @@ process BIAS_ANALYSIS {
     """
 }
 
+// id is the MultiQC display label for one (dataset, negative set), not meta.id.
 process COLLECT_BIAS {
     tag "${id}_bias_scatter"
 
@@ -42,12 +45,14 @@ process COLLECT_BIAS {
     """
 }
 
+// `id` (meta.id) is the publishDir component, `label` the MultiQC display label;
+// they differ for a row with several negative sets.
 process SIMILARITY_HEATMAP {
     publishDir(path: { "${params.outdir}/${id}/multiqc" }, mode: 'copy')
-    tag "${id}_heatmap"
+    tag "${label}_heatmap"
 
     input:
-    tuple val(id), path(train_fasta), path(val_fasta), path(test_fasta), path(blast_tsv)
+    tuple val(id), val(label), path(train_fasta), path(val_fasta), path(test_fasta), path(blast_tsv)
 
     output:
     tuple val(id), path("similarity_heatmap_mqc.html")
@@ -61,7 +66,7 @@ process SIMILARITY_HEATMAP {
         --blast       ${blast_tsv} \\
         --max_per_split ${params.heatmap_max_per_split} \\
         --seed        ${params.seed} \\
-        --id          ${id}
+        --id          ${label}
     """
 }
 
@@ -69,19 +74,31 @@ process SIMILARITY_HEATMAP {
 // dataset's contributions into its own numbered subdirectory, since
 // same-named files (e.g. classifier_metrics_mqc.tsv) would otherwise
 // collide -- MultiQC scans subdirectories recursively, so this is transparent.
+// relabel_mqc.py applies the run-wide dataset order here, so it stays out of the
+// emitting tasks' hashes, and pins the section order MultiQC would otherwise take
+// from channel arrival.
 process MULTIQC {
     publishDir(path: { "${params.outdir}/multiqc" }, mode: 'copy')
     tag "multiqc"
 
     input:
     path multiqc_files, stageAs: "?/*"
+    val  mqc_order  // comma-joined display labels, in report order
 
     output:
-    path "multiqc_report.html"
-    path "multiqc_report_data"
+    path "multiqc_report.html", emit: report
+    path "multiqc_report_data", emit: data
 
     script:
     """
-    multiqc . --title "PPI Splitting Pipeline" --filename multiqc_report.html
+    relabel_mqc.py . \\
+        --out       relabelled \\
+        --mqc-order '${mqc_order}' \\
+        --config    multiqc_config.yml
+
+    multiqc relabelled \\
+        -c multiqc_config.yml \\
+        --title "PPI Splitting Pipeline" \\
+        --filename multiqc_report.html
     """
 }
