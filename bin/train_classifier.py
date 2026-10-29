@@ -94,7 +94,8 @@ def write_mqc(results, id_):
                 "#     Accuracy:   {format: '{:.4f}'}\n"
                 "Sample\tID\tAUROC\tAUPRC\tF1\tMCC\tPrecision\tRecall\tAccuracy\n"
             )
-            row = "\t".join(f"{metrics[c]:.4f}" for c in cols)
+            # metrics is None for an empty or single-class split: blank cells.
+            row = "\t".join("" if metrics is None else f"{metrics[c]:.4f}" for c in cols)
             fh.write(f"{id_}\t{id_}\t{row}\n")
 
 
@@ -119,22 +120,26 @@ def main():
     X_train, y_train = build_X(train_pairs, y_train, embeddings)
     X_val, y_val = build_X(val_pairs, y_val, embeddings)
 
-    # Hyperparameter search on val AUROC
-    print("Tuning hyperparameters ...", file=sys.stderr)
-    best_auroc, best_cfg = -1.0, None
-    for cfg in HP_CONFIGS:
-        clf = RandomForestClassifier(**cfg, random_state=args.seed, n_jobs=-1)
-        clf.fit(X_train, y_train)
-        auroc = roc_auc_score(y_val, clf.predict_proba(X_val)[:, 1])
-        print(f"  {cfg}  →  val AUROC {auroc:.4f}", file=sys.stderr)
-        if auroc > best_auroc:
-            best_auroc, best_cfg = auroc, cfg
+    # Hyperparameter search on val AUROC; an empty val split falls back to the first config.
+    if len(X_val) == 0:
+        print("Val split is empty -- skipping tuning, using the first config", file=sys.stderr)
+        best_cfg, best_auroc = HP_CONFIGS[0], float("nan")
+    else:
+        print("Tuning hyperparameters ...", file=sys.stderr)
+        best_auroc, best_cfg = -1.0, None
+        for cfg in HP_CONFIGS:
+            clf = RandomForestClassifier(**cfg, random_state=args.seed, n_jobs=-1)
+            clf.fit(X_train, y_train)
+            auroc = roc_auc_score(y_val, clf.predict_proba(X_val)[:, 1])
+            print(f"  {cfg}  →  val AUROC {auroc:.4f}", file=sys.stderr)
+            if auroc > best_auroc:
+                best_auroc, best_cfg = auroc, cfg
 
-    print(f"Best: {best_cfg}  (val AUROC {best_auroc:.4f})", file=sys.stderr)
+        print(f"Best: {best_cfg}  (val AUROC {best_auroc:.4f})", file=sys.stderr)
 
-    # Retrain on train + val combined
-    X_all = np.concatenate([X_train, X_val])
-    y_all = np.concatenate([y_train, y_val])
+    # Retrain on train + val combined (an empty split is a (0,)-shaped array).
+    X_all = np.concatenate([X_train, X_val]) if len(X_val) else X_train
+    y_all = np.concatenate([y_train, y_val]) if len(y_val) else y_train
     final_clf = RandomForestClassifier(**best_cfg, random_state=args.seed, n_jobs=-1)
     final_clf.fit(X_all, y_all)
 
@@ -143,6 +148,12 @@ def main():
     for name, path in [("test_balanced", args.test_balanced), ("test_realistic", args.test_realistic)]:
         pairs, y_test_raw = read_labelled_csv(path)
         X_test, y_test = build_X(pairs, y_test_raw, embeddings)
+        # An empty or single-class split has no AUROC: report a blank row.
+        if len(X_test) == 0 or len(set(y_test.tolist())) < 2:
+            reason = "empty" if len(X_test) == 0 else "single-class"
+            print(f"{name}: {reason} -- no metrics computed", file=sys.stderr)
+            results.append((name, None))
+            continue
         y_prob = final_clf.predict_proba(X_test)[:, 1]
         metrics = compute_metrics(y_test, y_prob)
         results.append((name, metrics))

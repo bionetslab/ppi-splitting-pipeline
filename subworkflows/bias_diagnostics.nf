@@ -1,16 +1,16 @@
-include { BIAS_ANALYSIS } from '../processes/qc'
+include { BIAS_ANALYSIS; COLLECT_BIAS } from '../processes/qc'
 
-// Runs BIAS_ANALYSIS for every attribute applicable to each dataset. Shared
-// by the full pipeline's QC subworkflow (subworkflows/qc.nf) and the
-// --bias_only shortcut (subworkflows/bias_only.nf), so the attribute list
-// and the same_species rule live in exactly one place.
+// Runs BIAS_ANALYSIS for every attribute applicable to each dataset and
+// negative set, and collects the results into one scatter per pair. Shared by
+// the full pipeline and --bias_only, so the attribute list and the
+// same_species rule live in exactly one place.
 workflow BIAS_DIAGNOSTICS {
     take:
-    train_ppis            // tuple(meta, path)
+    train_ppis            // tuple(meta, negset, path)
     val_ppis
     test_balanced_ppis
     test_realistic_ppis
-    blast_out
+    blast_out             // tuple(meta, path)
     embeddings
     go_annotations_ch
     species_ch
@@ -29,21 +29,33 @@ workflow BIAS_DIAGNOSTICS {
         tuple(meta, attrs)
     }.flatMap { meta, attrs -> attrs.collect { a -> tuple(meta, a) } }
 
-    // train/val/test/blast/embeddings/go/species are one-per-dataset;
-    // combine(by: 0) broadcasts each dataset's single set of files to
-    // every one of that dataset's attributes, rather than a full cross-join.
-    bias_inputs = attrs_ch
-        .combine(train_ppis,          by: 0)
-        .combine(val_ppis,            by: 0)
-        .combine(test_balanced_ppis,  by: 0)
-        .combine(test_realistic_ppis, by: 0)
-        .combine(blast_out,           by: 0)
-        .combine(embeddings,          by: 0)
-        .combine(go_annotations_ch,   by: 0)
-        .combine(species_ch,          by: 0)
+    // join(by: [0, 1]): a join on meta alone would pair one negative set's
+    // train CSV with another's val CSV.
+    negset_splits = train_ppis.join(val_ppis, by: [0, 1])
+        .join(test_balanced_ppis,  by: [0, 1])
+        .join(test_realistic_ppis, by: [0, 1])
+    // tuple(meta, negset, train, val, test_balanced, test_realistic)
+
+    // blast/embeddings/go/species are one-per-dataset; combine(by: 0) broadcasts
+    // them to every (attribute, negative set) pair rather than a full cross-join.
+    bias_inputs = negset_splits
+        .combine(attrs_ch, by: 0)
+        .map { meta, negset, train, val, tb, tr, attr -> tuple(meta, attr, negset, train, val, tb, tr) }
+        .combine(blast_out,         by: 0)
+        .combine(embeddings,        by: 0)
+        .combine(go_annotations_ch, by: 0)
+        .combine(species_ch,        by: 0)
 
     bias = BIAS_ANALYSIS(bias_inputs)
 
+    // Group by the negset-qualified label so a row's sets get separate scatters.
+    bias_by_negset = bias.mqc.flatMap { meta, negset, f ->
+        def files = (f instanceof List) ? f : [f]
+        def multi = meta.negative_sampling_method.toString().tokenize(',').size() > 1
+        files.collect { ff -> tuple((multi ? "${meta.id}_${negset}" : "${meta.id}").toString(), ff) }
+    }
+    scatter = COLLECT_BIAS(bias_by_negset.groupTuple())
+
     emit:
-    mqc = bias.mqc
+    scatter = scatter.mqc   // tuple(label, bias_scatter_mqc.html)
 }

@@ -27,7 +27,7 @@ process TRAIN_CLASSIFIER {
     label 'error_retry'
 
     input:
-    tuple val(meta), path(train_csv), path(val_csv), path(test_balanced_csv), path(test_realistic_csv), path(embeddings)
+    tuple val(meta), val(negset), path(train_csv), path(val_csv), path(test_balanced_csv), path(test_realistic_csv), path(embeddings)
 
     output:
     tuple val(meta), path("classifier_metrics_*_mqc.tsv"), emit: mqc
