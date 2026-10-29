@@ -1,47 +1,51 @@
+include { mqcLabel } from '../helpers/mqc_labels'
+
+// nsuffix goes on the output filename, never on --split-name: that is looked up
+// in utils.SPLIT_ORDER, and an unknown key would misorder the report.
 process SAMPLE_NEGATIVES_DEGREE {
     publishDir(path: { "${params.outdir}/${meta.id}" }, mode: 'copy', saveAs: { f -> f.endsWith('_mqc.tsv') ? null : f })
-    tag "${meta.id}_${label}"
+    tag "${meta.id}${nsuffix}_${label}"
     label 'error_retry'
 
     input:
-    // Staged under a fixed name distinct from "${label}.csv" -- otherwise for
-    // label in {train, val} the output would overwrite the staged input
+    // Staged under a fixed name distinct from "${label}${nsuffix}.csv" -- otherwise
+    // for label in {train, val} the output would overwrite the staged input
     // symlink, corrupting the upstream task's cached output on -resume.
-    tuple val(meta), val(label), path(positives, stageAs: 'positives_in.csv'), val(ratio), val(uniform)  // label: "train" | "val" | "test_balanced" | "test_realistic"
+    tuple val(meta), val(negset), val(label), val(nsuffix), path(positives, stageAs: 'positives_in.csv'), val(ratio), val(uniform)  // label: "train" | "val" | "test_balanced" | "test_realistic"
 
     output:
-    tuple val(meta), val(label), path("${label}.csv"), emit: labelled
-    tuple val(meta), path("${label}*_mqc.tsv"),         emit: mqc
+    tuple val(meta), val(negset), val(label), val(nsuffix), path("${label}${nsuffix}.csv"), emit: labelled
+    tuple val(meta), path("${label}*_mqc.tsv"),                                             emit: mqc
 
     script:
     def uniform_flag = uniform ? '--uniform' : ''
     """
     sample_negatives.py \\
         --positives  ${positives} \\
-        --output     ${label}.csv \\
+        --output     ${label}${nsuffix}.csv \\
         --split-name ${label} \\
         --ratio      ${ratio} \\
         ${uniform_flag} \\
         --seed       ${params.seed} \\
-        --id         ${meta.id}
+        --id         ${mqcLabel(meta, negset)}
     """
 }
 
 process SAMPLE_NEGATIVES_ILP {
     publishDir(path: { "${params.outdir}/${meta.id}" }, mode: 'copy', saveAs: { f -> f.endsWith('_mqc.tsv') ? null : f })
-    tag "${meta.id}_${label}"
+    tag "${meta.id}${nsuffix}_${label}"
     label 'error_retry'
     label 'gurobi'
 
     input:
-    // positives is staged under a fixed name distinct from any "${label}.csv"
+    // positives is staged under a fixed name distinct from any "${label}${nsuffix}.csv"
     // output -- see SAMPLE_NEGATIVES_DEGREE above for why that matters.
-    tuple val(meta), val(label), path(positives, stageAs: 'positives_in.csv'), val(neg_ratio), path(species), path(go_annotations), path(candidate_network)  // label: "train" | "val" | "test_balanced" | "test_realistic"; candidate_network optional, [] if unset
+    tuple val(meta), val(negset), val(label), val(nsuffix), path(positives, stageAs: 'positives_in.csv'), val(neg_ratio), path(species), path(go_annotations), path(candidate_network)  // label: "train" | "val" | "test_balanced" | "test_realistic"
     path gurobi_license  // optional; [] if params.gurobi_license is unset
 
     output:
-    tuple val(meta), val(label), path("${label}.csv"), emit: labelled
-    tuple val(meta), path("${label}*_mqc.tsv"),         emit: mqc
+    tuple val(meta), val(negset), val(label), val(nsuffix), path("${label}${nsuffix}.csv"), emit: labelled
+    tuple val(meta), path("${label}*_mqc.tsv"),                                             emit: mqc
 
     script:
     def cand_arg = candidate_network ? "--candidate-network ${candidate_network}" : ''
@@ -52,7 +56,7 @@ process SAMPLE_NEGATIVES_ILP {
 
     sample_negatives_ilp.py \\
         --positives          ${positives} \\
-        --output             ${label}.csv \\
+        --output             ${label}${nsuffix}.csv \\
         --split-name         ${label} \\
         --neg-ratio          ${neg_ratio} \\
         --species            ${species} \\
@@ -72,6 +76,43 @@ process SAMPLE_NEGATIVES_ILP {
         --residuals-out      ${label}_residuals_mqc.tsv \\
         --max-candidates     \$max_candidates \\
         --verbose \\
-        --id                 ${meta.id}
+        --id                 ${mqcLabel(meta, negset)}
+    """
+}
+
+// DDI mode only: turns the labelled family pairs into domain-instance pairs --
+// positives from SELECT_EXAMPLES' examples, negatives drawn from the split's universe.
+process EXPAND_NEGATIVES {
+    publishDir(path: { "${params.outdir}/${meta.id}" }, mode: 'copy', saveAs: { f -> f.endsWith('_mqc.tsv') ? null : f })
+    tag "${meta.id}${nsuffix}_${label}"
+    label 'error_retry'
+
+    input:
+    // split is the SELECT_EXAMPLES split ("test" for both test labels). labelled
+    // is staged under a fixed name -- see SAMPLE_NEGATIVES_DEGREE.
+    tuple val(meta), val(split), val(negset), val(label), val(nsuffix),
+          path(labelled, stageAs: 'labelled_in.csv'),
+          path(examples), path(candidate_examples), path(universe), path(reserve), path(fasta),
+          path(instances)
+
+    output:
+    tuple val(meta), val(negset), val(label), val(nsuffix), path("${label}${nsuffix}_instances.csv"), emit: labelled
+    tuple val(meta), path("${label}*_mqc.tsv"),                                                       emit: mqc
+
+    script:
+    """
+    expand_negatives.py \\
+        --labelled           ${labelled} \\
+        --examples           ${examples} \\
+        --candidate-examples ${candidate_examples} \\
+        --universe           ${universe} \\
+        --reserve            ${reserve} \\
+        --instances          ${instances} \\
+        --fasta              ${fasta} \\
+        --output             ${label}${nsuffix}_instances.csv \\
+        --split-name         ${label} \\
+        --examples-target    ${params.ddi_examples_target} \\
+        --seed               ${params.seed} \\
+        --id                 ${mqcLabel(meta, negset)}
     """
 }

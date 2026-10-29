@@ -16,7 +16,10 @@ import cvxpy as cp
 import numpy as np
 
 from utils import (
+    expand_members,
+    instances_by_family,
     read_fasta,
+    read_instances,
     read_node_mapping,
     read_partition,
     read_ppis,
@@ -63,7 +66,19 @@ def build_matrices(clusters_list, protein_to_cluster, ppi_rows):
     return cross_ppi, intra_ppi
 
 
-def solve_ilp(clusters_list, intra_ppi, cross_ppi, splits, names, epsilon, max_sec, solver):
+def _solver_options(solver, seed, max_sec):
+    """Solver-specific time-limit and seed options; {} for an unknown solver (case-insensitive)."""
+    solver = (solver or "").upper()
+    if solver == cp.GUROBI:
+        return {"TimeLimit": max_sec, "Seed": seed}
+    if solver == cp.HIGHS:
+        return {"time_limit": max_sec, "random_seed": seed}
+    if solver == cp.SCIP:
+        return {"scip_params": {"limits/time": max_sec, "randomization/randomseedshift": seed}}
+    return {}
+
+
+def solve_ilp(clusters_list, intra_ppi, cross_ppi, splits, names, epsilon, max_sec, solver, seed):
     """
     Variables: x[s, c] ∈ {0,1}  — cluster c assigned to split s.
 
@@ -81,6 +96,12 @@ def solve_ilp(clusters_list, intra_ppi, cross_ppi, splits, names, epsilon, max_s
     Objective (minimize): the data loss, i.e., PPIs between clusters assigned to different splits.
         min_X Σ_{i=1}^{n-1}Σ_{j=i+1}^{n} k(c_i,c_j) * (1 - Σ_{s=1}^S x[s,c_i] * x[s,c_j])
     """
+    # Constraint 3 does not keep a fraction-0 split empty, so drop such splits from the
+    # model; main() still writes their (empty) csv/fasta.
+    active = [s for s, frac in enumerate(splits) if frac > 0]
+    splits = [splits[s] for s in active]
+    names = [names[s] for s in active]
+
     n_splits = len(splits)
     n_clusters = len(clusters_list)
 
@@ -134,11 +155,22 @@ def solve_ilp(clusters_list, intra_ppi, cross_ppi, splits, names, epsilon, max_s
 
     problem = cp.Problem(objective, constraints)
 
-    kwargs = dict(time_limit=max_sec, verbose=True)
     if solver:
-        problem.solve(solver=solver, **kwargs)
+        solver_opts = _solver_options(solver, seed, max_sec)
+        if not solver_opts:
+            print(
+                f"Warning: no known options for solver {solver}; time limit passed as time_limit, "
+                f"tie-breaking unseeded.",
+                file=sys.stderr,
+            )
+            solver_opts = {"time_limit": max_sec}
+        problem.solve(solver=solver, verbose=True, **solver_opts)
     else:
-        problem.solve(**kwargs)
+        print(
+            "Warning: no --solver given, so the solve is unseeded; pass --solver for a reproducible split.",
+            file=sys.stderr,
+        )
+        problem.solve(time_limit=max_sec, verbose=True)
 
     if problem.status not in cp.settings.SOLUTION_PRESENT:
         print(f"Solver status: {problem.status}", file=sys.stderr)
@@ -168,6 +200,10 @@ def main():
     ap.add_argument("--fasta", required=True, help="Protein FASTA")
     ap.add_argument("--partition", required=True, help="KaHIP partition file")
     ap.add_argument("--node_mapping", required=True, help="KaHIP node_mapping.tsv (node_id -> protein_id)")
+    ap.add_argument(
+        "--instances",
+        help="instances.tsv (DDI mode only): maps families to clans and domain instances",
+    )
     ap.add_argument("--train-split", type=float, default=0.8)
     ap.add_argument("--val-split", type=float, default=0.1)
     ap.add_argument("--test-split", type=float, default=0.1)
@@ -176,22 +212,34 @@ def main():
     )
     ap.add_argument("--max-sec", type=int, default=300, help="ILP solver time limit in seconds (default 300)")
     ap.add_argument("--solver", default=None, help="CVXPY solver name, e.g. SCIP, GLPK_MI (default: auto)")
+    ap.add_argument("--seed", type=int, default=42, help="solver tie-breaking seed (default 42)")
     args = ap.parse_args()
 
     splits = [args.train_split, args.val_split, args.test_split]
     names = ["train", "val", "test"]
     assert abs(sum(splits) - 1.0) < 1e-6, "Split fractions must sum to 1"
 
+    inst_rows = read_instances(args.instances) if args.instances else None
+    members = instances_by_family(inst_rows) if inst_rows else None
+    node_label = "families" if inst_rows else "proteins"
+
     print("Loading PPIs …", file=sys.stderr)
     ppi_rows = read_ppis(args.ppis)
 
     print("Reading FASTA …", file=sys.stderr)
     seqs = read_fasta(args.fasta)
-    all_proteins = sorted({p for row in ppi_rows for p in (row["protein1"], row["protein2"])} & set(seqs))
-    print(f"  {len(all_proteins):,} proteins with sequences", file=sys.stderr)
+    seq_ids = set(seqs)
+    # DDI mode: a family is usable iff at least one of its instances has a sequence.
+    all_nodes = {p for row in ppi_rows for p in (row["protein1"], row["protein2"])}
+    all_proteins = sorted(n for n in all_nodes if expand_members({n}, members) & seq_ids)
+    print(f"  {len(all_proteins):,} {node_label} with sequences", file=sys.stderr)
 
     print("Parsing KaHIP partition …", file=sys.stderr)
     protein_to_cluster = parse_kahip_partition(args.partition, args.node_mapping)
+    # DDI mode: the partition is over clans; re-key it to families.
+    if inst_rows:
+        clan_to_cluster = protein_to_cluster
+        protein_to_cluster = {r["family"]: clan_to_cluster[r["clan"]] for r in inst_rows}
     protein_to_cluster = {p: protein_to_cluster[p] for p in all_proteins if p in protein_to_cluster}
 
     clusters_list = sorted(set(protein_to_cluster.values()))
@@ -201,7 +249,7 @@ def main():
         cluster_counts[v] += 1
     sizes = sorted(cluster_counts.values(), reverse=True)
     print(
-        f"  {n_clusters:,} clusters; largest has {sizes[0]:,} proteins, " f"median {sizes[len(sizes)//2]:,}",
+        f"  {n_clusters:,} clusters; largest has {sizes[0]:,} {node_label}, " f"median {sizes[len(sizes)//2]:,}",
         file=sys.stderr,
     )
 
@@ -223,6 +271,7 @@ def main():
         args.epsilon,
         args.max_sec,
         args.solver,
+        args.seed,
     )
     if assignment is None:
         print("ILP did not find a feasible solution.", file=sys.stderr)
@@ -242,8 +291,8 @@ def main():
         rows = split_rows[name]
         proteins = {p for row in rows for p in (row["protein1"], row["protein2"])}
         write_ppi_csv(rows, f"{name}.csv")
-        write_fasta(seqs, proteins, f"{name}.fasta")
-        print(f"  {name}: {len(rows):,} PPIs, {len(proteins):,} proteins", file=sys.stderr)
+        write_fasta(seqs, expand_members(proteins, members), f"{name}.fasta")
+        print(f"  {name}: {len(rows):,} PPIs, {len(proteins):,} {node_label}", file=sys.stderr)
         split_results.append({"name": name, "n_ppis": len(rows)})
 
     n_ppis_assigned = sum(r["n_ppis"] for r in split_results)

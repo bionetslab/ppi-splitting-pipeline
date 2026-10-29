@@ -2,7 +2,13 @@
 .nextflow*
 work/
 results/
-data/
+# Default --interpro_cache for -profile test_ddi
+.pfam_cache/
+# `data/*`, not `data/`: git cannot re-include a file inside an excluded directory.
+data/*
+!data/test_ppis.csv
+!data/test_ddis.csv
+!data/test_ddi_candidates.csv
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
