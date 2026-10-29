@@ -1,0 +1,7 @@
+# Keep byte-code out of the image's baked-in bin/ and run artefacts out of the build context.
+**/__pycache__
+**/*.py[cod]
+work/
+results/
+data/
+.nextflow*
