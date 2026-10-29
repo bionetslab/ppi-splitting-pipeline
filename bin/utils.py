@@ -2,7 +2,9 @@
 """Shared I/O utilities for PPI pipeline scripts."""
 
 import csv
+import heapq
 import sys
+from collections import defaultdict
 
 import numpy as np
 
@@ -68,6 +70,100 @@ def write_ppi_csv(rows, path):
 
 
 # ---------------------------------------------------------------------------
+# Domain instance table I/O (DDI mode)
+# ---------------------------------------------------------------------------
+
+INSTANCE_COLUMNS = ["instance_id", "family", "clan", "protein_id", "start", "end", "taxon_id", "source_db"]
+
+
+def read_instances(path):
+    """Return list of row dicts from an instances.tsv."""
+    with open(path) as fh:
+        return list(csv.DictReader(fh, delimiter="\t"))
+
+
+def instances_by_family(rows):
+    """Invert read_instances() output to {family: {instance_id}}."""
+    members = {}
+    for row in rows:
+        members.setdefault(row["family"], set()).add(row["instance_id"])
+    return members
+
+
+def instance_parent(instance_id):
+    """Return the parent protein of an instance id ({family}_{protein}_{start}_{end})."""
+    return instance_id.rsplit("_", 3)[1]
+
+
+EMPTY = frozenset()
+
+
+def pair_candidates(fam1, fam2, members, available):
+    """Return every instance pair of (fam1, fam2) within `available`; self-interactions include (i, i)."""
+    # A family can be missing from instances.tsv (e.g. a dead Pfam accession).
+    la = sorted(members.get(fam1, EMPTY) & available)
+    if fam1 == fam2:
+        return [(a, b) for i, a in enumerate(la) for b in la[i:]]
+    lb = sorted(members.get(fam2, EMPTY) & available)
+    return [(a, b) for a in la for b in lb]
+
+
+def diverse_pick(pairs, k, parent_of, rng):
+    """Pick up to k pairs, preferring pairs whose parent proteins are least used so far.
+
+    Each pick takes the lowest (used[parent_a] + used[parent_b], shuffled index), kept in a lazy heap.
+    """
+    order = sorted(pairs)
+    rng.shuffle(order)
+
+    touching = defaultdict(list)
+    for i, (a, b) in enumerate(order):
+        pa, pb = parent_of[a], parent_of[b]
+        touching[pa].append(i)
+        if pb != pa:
+            touching[pb].append(i)
+
+    score = [0] * len(order)
+    taken = [False] * len(order)
+    heap = [(0, i) for i in range(len(order))]  # already in heap order
+    used, chosen = defaultdict(int), []
+    while len(chosen) < k and heap:
+        s, i = heapq.heappop(heap)
+        if taken[i] or s != score[i]:
+            continue
+        taken[i] = True
+        a, b = order[i]
+        chosen.append(order[i])
+        # A pair whose instances share a parent uses that parent twice.
+        used[parent_of[a]] += 1
+        used[parent_of[b]] += 1
+        for p in {parent_of[a], parent_of[b]}:
+            for j in touching[p]:
+                if not taken[j]:
+                    score[j] = used[parent_of[order[j][0]]] + used[parent_of[order[j][1]]]
+                    heapq.heappush(heap, (score[j], j))
+    return chosen
+
+
+def expand_members(groups, members):
+    """Return the union of the members of `groups`; identity when `members` is falsy (PPI mode)."""
+    if not members:
+        return set(groups)
+    return {m for g in groups for m in members.get(g, ())}
+
+
+def strict_survivors(present, keep, members):
+    """Return the groups whose every member in `present` is also in `keep`.
+
+    Plain `present & keep` when `members` is falsy (PPI mode).
+    """
+    if not members:
+        return present & keep
+    lost = present - keep
+    return {g for g, ms in members.items() if (ms & present) and not (ms & lost)}
+
+
+# ---------------------------------------------------------------------------
 # KaHIP partition I/O
 # ---------------------------------------------------------------------------
 
@@ -121,15 +217,20 @@ def load_embeddings(path):
 # MultiQC sorts rows alphabetically by Sample name, so a plain f"{id}_{split}"
 # would show test_balanced, test_realistic, train, val. This numeric prefix
 # forces train/val/test/test_balanced/test_realistic order per dataset.
-SPLIT_SORT_KEY = {"train": 1, "val": 2, "test": 3, "test_balanced": 4, "test_realistic": 5, "discarded": 6}
+SPLIT_ORDER = ["train", "val", "test", "test_balanced", "test_realistic", "discarded"]
 
 
-def mqc_sample(id_, split):
+def mqc_sample(label, split):
     """Build a MultiQC Sample name for one dataset+split that sorts correctly."""
-    return f"{id_}_{SPLIT_SORT_KEY.get(split, 9)}_{split}"
+    return f"{label}_{SPLIT_ORDER.index(split) + 1}_{split}"
+
+
+def mqc_dataset(label):
+    """Build a MultiQC Sample name for a row that covers a whole dataset."""
+    return label
 
 
 def mqc_category(name):
     """Same sort-key prefix as mqc_sample, for bar-chart categories that are
     already scoped to one dataset's own chart (no id_ qualification needed)."""
-    return f"{SPLIT_SORT_KEY.get(name, 9)}_{name}"
+    return f"{SPLIT_ORDER.index(name) + 1}_{name}"

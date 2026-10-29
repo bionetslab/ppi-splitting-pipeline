@@ -8,14 +8,14 @@ include { FETCH_DATA; GET_LENGTHS; GET_LENGTHS as GET_LENGTHS_SHARED; SUBSET_FET
 // fetched once, then split back out per dataset (SUBSET_FETCHED_DATA).
 workflow DATA_PREP {
     take:
-    datasets_ch  // tuple(meta, ppis, sequences, go_annotations, species, blast_results, candidate_network)
+    datasets_ch  // tuple(meta, files): ppis, sequences, go_annotations, species
 
     main:
-    branched = datasets_ch.branch { meta, ppis, sequences, go_annotations, species, blast_results, candidate_network ->
-        precomputed: sequences && go_annotations && species
-            return tuple(meta, sequences, go_annotations, species)
+    branched = datasets_ch.branch { meta, f ->
+        precomputed: f.sequences && f.go_annotations && f.species
+            return tuple(meta, f.sequences, f.go_annotations, f.species)
         needs_fetch: true
-            return tuple(meta, ppis)
+            return tuple(meta, f.ppis)
     }
 
     // Precomputed datasets: use the supplied files as-is; each still needs
@@ -50,9 +50,16 @@ workflow DATA_PREP {
     species_ch        = precomputed_species.mix(subset_out.species)
     lengths_ch        = precomputed_lengths.mix(subset_out.lengths)
 
+    // Placeholder for DATA_PREP_DDI's instances.tsv: a missing item would make
+    // downstream joins drop the dataset silently.
+    instances_ch = datasets_ch.map { meta, f -> tuple(meta, []) }
+
     emit:
     sequences      = sequences_ch
     go_annotations = go_annotations_ch
     species        = species_ch
     lengths        = lengths_ch
+    instances      = instances_ch
+    // DDI mode only; empty here so both DATA_PREP* emit the same channels.
+    dropped_families = channel.empty()
 }

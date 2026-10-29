@@ -19,7 +19,17 @@ import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from utils import mqc_category, read_fasta, read_ppis, write_fasta, write_ppi_csv
+from utils import (
+    expand_members,
+    instances_by_family,
+    mqc_category,
+    read_fasta,
+    read_instances,
+    read_ppis,
+    strict_survivors,
+    write_fasta,
+    write_ppi_csv,
+)
 
 
 def fasta_ids(path):
@@ -82,9 +92,15 @@ def main():
     ap.add_argument("--sim_train_val", required=True)
     ap.add_argument("--sim_train_test", required=True)
     ap.add_argument("--id", required=True, help="Dataset ID, for MultiQC tagging")
+    ap.add_argument(
+        "--instances",
+        help="instances.tsv (DDI mode only): a family survives only if every instance of it did",
+    )
     args = ap.parse_args()
 
     n_input = len(read_ppis(args.ppis))
+    members = instances_by_family(read_instances(args.instances)) if args.instances else None
+    node_label = "families" if members else "proteins"
 
     train_seqs = read_fasta(args.train_fasta)
     val_seqs = read_fasta(args.val_fasta)
@@ -98,27 +114,29 @@ def main():
     val_keep = fasta_ids(args.sim_train_val)
     test_keep = fasta_ids(args.sim_train_test)
 
-    train_prot_nr = set(train_seqs)
-    val_prot_nr = set(val_seqs) & val_keep
-    test_prot_nr = set(test_seqs) & test_keep
+    # CSVs are keyed by node (protein / family), FASTAs by sequence id (protein / instance).
+    # train is the CD-HIT reference and loses nothing.
+    train_node_nr = strict_survivors(set(train_seqs), set(train_seqs), members)
+    val_node_nr = strict_survivors(set(val_seqs), val_keep, members)
+    test_node_nr = strict_survivors(set(test_seqs), test_keep, members)
 
-    train_ppis_nr = filter_ppis(train_ppis, train_prot_nr)
-    val_ppis_nr = filter_ppis(val_ppis, val_prot_nr)
-    test_ppis_nr = filter_ppis(test_ppis, test_prot_nr)
+    train_ppis_nr = filter_ppis(train_ppis, train_node_nr)
+    val_ppis_nr = filter_ppis(val_ppis, val_node_nr)
+    test_ppis_nr = filter_ppis(test_ppis, test_node_nr)
 
     write_ppi_csv(train_ppis_nr, "train_nr.csv")
     write_ppi_csv(val_ppis_nr, "val_nr.csv")
     write_ppi_csv(test_ppis_nr, "test_nr.csv")
-    write_fasta(train_seqs, train_prot_nr, "train_nr.fasta")
-    write_fasta(val_seqs, val_prot_nr, "val_nr.fasta")
-    write_fasta(test_seqs, test_prot_nr, "test_nr.fasta")
+    write_fasta(train_seqs, expand_members(train_node_nr, members), "train_nr.fasta")
+    write_fasta(val_seqs, expand_members(val_node_nr, members), "val_nr.fasta")
+    write_fasta(test_seqs, expand_members(test_node_nr, members), "test_nr.fasta")
 
-    for name, ppis, prot in [
-        ("train_nr", train_ppis_nr, train_prot_nr),
-        ("val_nr", val_ppis_nr, val_prot_nr),
-        ("test_nr", test_ppis_nr, test_prot_nr),
+    for name, ppis, nodes in [
+        ("train_nr", train_ppis_nr, train_node_nr),
+        ("val_nr", val_ppis_nr, val_node_nr),
+        ("test_nr", test_ppis_nr, test_node_nr),
     ]:
-        print(f"{name}: {len(ppis)} PPIs, {len(prot)} proteins", file=sys.stderr)
+        print(f"{name}: {len(ppis)} PPIs, {len(nodes)} {node_label}", file=sys.stderr)
 
     # kahip/ilp assign every PPI to one split or discard it, so comparing input
     # total to the pre-CD-HIT split totals gives the discard count directly,

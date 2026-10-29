@@ -1294,6 +1294,8 @@ def sample_negatives_ilp(
             go_membership=go_membership,
             go_sizes=go_sizes,
         )
+    # A split can be empty (a 0 split fraction): write an empty labelled CSV before the
+    # diagnostics and build_context below, which fail on zero-size arrays.
     n_pos = int(len(pos_pairs))
     n_neg = int(round(neg_ratio * n_pos))
     if n_pos > 0 and len(candidates) == 0:
@@ -1301,6 +1303,32 @@ def sample_negatives_ilp(
             f"{name}: need {n_neg} negatives but no candidate pairs are available. "
             f"Supply a larger --candidate-network or lower the negative ratio."
         )
+    if n_pos == 0:
+        logging.warning(
+            "%s: %d positives / %d negatives / %d candidates -- writing an empty split.",
+            name,
+            n_pos,
+            n_neg,
+            len(candidates),
+        )
+        write_split_csv(pos_ppis, [], idx_to_protein, output_path)
+        return {
+            "split": name,
+            "n_pos": n_pos,
+            "n_neg": n_neg,
+            "r": neg_ratio,
+            "n_candidates": int(len(candidates)),
+            "obj_value": 0.0,
+            "bias_deg_term": 0.0,
+            "bias_tax_term": 0.0,
+            "bias_self_term": 0.0,
+            "bias_jac_term": 0.0,
+            "solver": "none",
+            "wall_time_s": 0.0,
+            "mip_gap": 0.0,
+            "status": "empty split",
+        }, None
+
     print(f"Candidate pool size: {len(candidates)}", file=sys.stderr)
     print(
         f"Number of unique proteins in the candidate set: {len(np.unique(candidates))}",
