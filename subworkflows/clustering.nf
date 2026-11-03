@@ -10,6 +10,7 @@ workflow CLUSTERING {
     sequences_ch      // tuple(meta, fasta)
     lengths_ch        // tuple(meta, lengths)
     blast_results_ch  // tuple(meta, blast_results_or_[])
+    instances_ch      // tuple(meta, instances_or_[])
 
     main:
     branched = sequences_ch.join(blast_results_ch).branch { meta, fasta, blast_results ->
@@ -21,19 +22,29 @@ workflow CLUSTERING {
 
     blast_out = RUN_BLAST(branched.needs_blast).mix(branched.precomputed)
 
-    metis_branched = blast_out.join(lengths_ch).branch { meta, results, lengths ->
+    // In DDI mode instances.tsv contracts the graph to one node per Pfam clan.
+    // "random" datasets skip METIS/KaHIP and get (meta, []) placeholders below
+    // so SPLIT_POSITIVES's partition/node_mapping joins still pair them.
+    metis_branched = blast_out.join(lengths_ch).join(instances_ch).branch { meta, results, lengths, instances ->
         skip_partition: meta.split_method == "random"
             return meta
         needs_partition: true
-            return tuple(meta, results, lengths)
+            return tuple(meta, results, lengths, instances)
     }
 
     metis_out = MAKE_METIS(metis_branched.needs_partition)
 
     // The ILP splitter clusters proteins into many small KaHIP partitions
     // first, whereas the default splitter partitions straight into train/val/test.
+    // k is clamped to the node count: a larger k leaves empty KaHIP blocks and
+    // makes the ILP infeasible. The clan graph in DDI mode is often that small.
     kahip_inputs = metis_out.graph.map { meta, graph ->
-        def k = (meta.split_method == "ilp") ? meta.ilp_kahip_k : meta.kahip_k
+        def k      = (meta.split_method == "ilp") ? meta.ilp_kahip_k : meta.kahip_k
+        def nodes  = graph.withReader { reader -> reader.readLine() }.trim().split(/\s+/)[0] as int
+        if (k > nodes) {
+            log.warn "${meta.id}: similarity.graph has only ${nodes} nodes -- clamping k from ${k} to ${nodes}"
+            k = nodes
+        }
         tuple(meta, graph, k)
     }
     kahip_out = RUN_KAHIP(kahip_inputs)
