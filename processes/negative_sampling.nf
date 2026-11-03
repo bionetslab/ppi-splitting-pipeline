@@ -1,24 +1,26 @@
+// nsuffix goes on the output filename, never on --split-name: that is looked up
+// in utils.SPLIT_ORDER, and an unknown key would misorder the report.
 process SAMPLE_NEGATIVES_DEGREE {
     publishDir(path: { "${params.outdir}/${meta.id}" }, mode: 'copy', saveAs: { f -> f.endsWith('_mqc.tsv') ? null : f })
-    tag "${meta.id}_${label}"
+    tag "${meta.id}${nsuffix}_${label}"
     label 'error_retry'
 
     input:
-    // Staged under a fixed name distinct from "${label}.csv" -- otherwise for
-    // label in {train, val} the output would overwrite the staged input
+    // Staged under a fixed name distinct from "${label}${nsuffix}.csv" -- otherwise
+    // for label in {train, val} the output would overwrite the staged input
     // symlink, corrupting the upstream task's cached output on -resume.
-    tuple val(meta), val(label), path(positives, stageAs: 'positives_in.csv'), val(ratio), val(uniform)  // label: "train" | "val" | "test_balanced" | "test_realistic"
+    tuple val(meta), val(negset), val(label), val(nsuffix), path(positives, stageAs: 'positives_in.csv'), val(ratio), val(uniform)  // label: "train" | "val" | "test_balanced" | "test_realistic"
 
     output:
-    tuple val(meta), val(label), path("${label}.csv"), emit: labelled
-    tuple val(meta), path("${label}*_mqc.tsv"),         emit: mqc
+    tuple val(meta), val(negset), val(label), val(nsuffix), path("${label}${nsuffix}.csv"), emit: labelled
+    tuple val(meta), path("${label}*_mqc.tsv"),                                             emit: mqc
 
     script:
     def uniform_flag = uniform ? '--uniform' : ''
     """
     sample_negatives.py \\
         --positives  ${positives} \\
-        --output     ${label}.csv \\
+        --output     ${label}${nsuffix}.csv \\
         --split-name ${label} \\
         --ratio      ${ratio} \\
         ${uniform_flag} \\
@@ -29,19 +31,19 @@ process SAMPLE_NEGATIVES_DEGREE {
 
 process SAMPLE_NEGATIVES_ILP {
     publishDir(path: { "${params.outdir}/${meta.id}" }, mode: 'copy', saveAs: { f -> f.endsWith('_mqc.tsv') ? null : f })
-    tag "${meta.id}_${label}"
+    tag "${meta.id}${nsuffix}_${label}"
     label 'error_retry'
     label 'gurobi'
 
     input:
-    // positives is staged under a fixed name distinct from any "${label}.csv"
+    // positives is staged under a fixed name distinct from any "${label}${nsuffix}.csv"
     // output -- see SAMPLE_NEGATIVES_DEGREE above for why that matters.
-    tuple val(meta), val(label), path(positives, stageAs: 'positives_in.csv'), val(neg_ratio), path(species), path(go_annotations), path(candidate_network)  // label: "train" | "val" | "test_balanced" | "test_realistic"; candidate_network optional, [] if unset
+    tuple val(meta), val(negset), val(label), val(nsuffix), path(positives, stageAs: 'positives_in.csv'), val(neg_ratio), path(species), path(go_annotations), path(candidate_network)  // label: "train" | "val" | "test_balanced" | "test_realistic"
     path gurobi_license  // optional; [] if params.gurobi_license is unset
 
     output:
-    tuple val(meta), val(label), path("${label}.csv"), emit: labelled
-    tuple val(meta), path("${label}*_mqc.tsv"),         emit: mqc
+    tuple val(meta), val(negset), val(label), val(nsuffix), path("${label}${nsuffix}.csv"), emit: labelled
+    tuple val(meta), path("${label}*_mqc.tsv"),                                             emit: mqc
 
     script:
     def cand_arg = candidate_network ? "--candidate-network ${candidate_network}" : ''
@@ -52,7 +54,7 @@ process SAMPLE_NEGATIVES_ILP {
 
     sample_negatives_ilp.py \\
         --positives          ${positives} \\
-        --output             ${label}.csv \\
+        --output             ${label}${nsuffix}.csv \\
         --split-name         ${label} \\
         --neg-ratio          ${neg_ratio} \\
         --species            ${species} \\
