@@ -10,8 +10,13 @@ Attributes
 sequence_similarity           – BLAST pident between the pair, normalised to [0,1]
 embedding_similarity          – cosine similarity of the two protein embeddings
 functional_relatedness_BP/MF/CC – Jaccard similarity of GO term sets
-self_interactions             – 1 if both proteins are identical, 0 otherwise
+self_interactions             – 1 if both nodes are identical, 0 otherwise
 same species                  – 1 if both proteins belong to the same species, 0 otherwise
+topology_shortcut             – the two nodes' positive rate among the training split's own pairs
+parent_degree                 – DDI mode only: how often this pair's parent proteins are reused
+
+DDI mode is detected from the CSV's family1/family2 columns. self_interactions and
+topology_shortcut then act on the family pair instead of the instance pair.
 
 Utility       = NMI(A; Y) = MI / sqrt(H(A)·H(Y)), MI estimated by sklearn kNN, H(A) by histogram
 Detectability = Spearman ρ of a Ridge regressor predicting A from the pair embedding X
@@ -33,7 +38,7 @@ from sklearn.linear_model import Ridge
 from sklearn.feature_selection import mutual_info_classif
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from utils import load_embeddings, read_labelled_csv
+from utils import instance_parent, load_embeddings, read_family_pairs, read_labelled_csv
 
 
 def build_pair_X(pairs, embeddings):
@@ -106,9 +111,23 @@ def load_go_annotations(path):
     return result
 
 
-def self_interactions(pairs):
-    """1 if both proteins in the pair are identical, 0 otherwise."""
-    return np.array([1.0 if p1 == p2 else 0.0 for p1, p2 in pairs], dtype=np.float32)
+def self_interactions(node_pairs):
+    """1 if both nodes in the pair are identical, 0 otherwise."""
+    return np.array([1.0 if p1 == p2 else 0.0 for p1, p2 in node_pairs], dtype=np.float32)
+
+
+def parent_degree(pairs):
+    """Mean degree of the two parent proteins among this split's own pairs (DDI mode only).
+
+    A self-pair counts its parent twice, as in build_train_degree_ratio().
+    """
+    parents = [(instance_parent(p1), instance_parent(p2)) for p1, p2 in pairs]
+    deg = defaultdict(int)
+    for a, b in parents:
+        deg[a] += 1
+        deg[b] += 1
+
+    return np.array([(deg[a] + deg[b]) / 2.0 for a, b in parents], dtype=np.float32)
 
 
 def load_species(path):
@@ -132,8 +151,8 @@ def same_species_indicator(pairs, species_map):
 
 
 def build_train_degree_ratio(train_pairs, train_labels):
-    """Return {protein_id: pos_degree / (pos_degree + neg_degree)} from the
-    training split's own labelled pairs. A protein absent from training has
+    """Return {node: pos_degree / (pos_degree + neg_degree)} from the
+    training split's own labelled pairs. A node absent from training has
     no entry (undefined, not zero)."""
     pos = defaultdict(int)
     neg = defaultdict(int)
@@ -149,14 +168,14 @@ def build_train_degree_ratio(train_pairs, train_labels):
     return ratio
 
 
-def topology_shortcut(pairs, train_degree_ratio):
+def topology_shortcut(node_pairs, train_degree_ratio):
     """Per pair, how exploitable the "topology shortcut" is: each endpoint's
     training positive-rate pos_degree_in_training(p)/pos_plus_neg_degree_in_training(p),
     using whichever endpoint(s) occurred in training (averaged if both did).
     NaN if neither endpoint occurred in training -- the caller drops those
     pairs, since the shortcut can't apply to a wholly-unseen pair."""
     A = []
-    for p1, p2 in pairs:
+    for p1, p2 in node_pairs:
         r1 = train_degree_ratio.get(p1)
         r2 = train_degree_ratio.get(p2)
         if r1 is None and r2 is None:
@@ -183,9 +202,9 @@ def smallest_class(y):
 
 
 def _prepare_split(pairs, y, embeddings):
-    """Return (X, filtered_pairs, filtered_y) keeping only pairs with embeddings."""
+    """Return (X, filtered_pairs, filtered_y, mask) keeping only pairs with embeddings."""
     X, mask = build_pair_X(pairs, embeddings)
-    return X, [p for p, ok in zip(pairs, mask) if ok], y[mask]
+    return X, [p for p, ok in zip(pairs, mask) if ok], y[mask], mask
 
 
 def func_relatedness(pairs, go_anns, category):
@@ -214,7 +233,7 @@ def analyse(A, X, y, name, seed=42, n_bins=10):
     H(A) is estimated by binning A into n_bins equal-width histogram bins
     (or using unique values directly when A is already discrete).
     """
-    discrete_features = name == "self_interactions"
+    discrete_features = name in DISCRETE_ATTRIBUTES
     mi = float(mutual_info_classif(A.reshape(-1, 1), y, discrete_features=discrete_features, random_state=seed)[0])
 
     _, y_counts = np.unique(y, return_counts=True)
@@ -241,15 +260,22 @@ def analyse(A, X, y, name, seed=42, n_bins=10):
 
 
 ATTRIBUTES = {
-    "sequence_similarity": lambda pairs, blast_sim, emb, go, sp, train_deg: seq_sim_within_pair(pairs, blast_sim),
-    "embedding_similarity": lambda pairs, blast_sim, emb, go, sp, train_deg: emb_sim_within_pair(pairs, emb),
-    "functional_relatedness_BP": lambda pairs, blast_sim, emb, go, sp, train_deg: func_relatedness(pairs, go, "BP"),
-    "functional_relatedness_MF": lambda pairs, blast_sim, emb, go, sp, train_deg: func_relatedness(pairs, go, "MF"),
-    "functional_relatedness_CC": lambda pairs, blast_sim, emb, go, sp, train_deg: func_relatedness(pairs, go, "CC"),
-    "self_interactions": lambda pairs, blast_sim, emb, go, sp, train_deg: self_interactions(pairs),
-    "same_species": lambda pairs, blast_sim, emb, go, sp, train_deg: same_species_indicator(pairs, sp),
-    "topology_shortcut": lambda pairs, blast_sim, emb, go, sp, train_deg: topology_shortcut(pairs, train_deg),
+    "sequence_similarity": lambda pairs, ctx: seq_sim_within_pair(pairs, ctx["blast_sim"]),
+    "embedding_similarity": lambda pairs, ctx: emb_sim_within_pair(pairs, ctx["embeddings"]),
+    "functional_relatedness_BP": lambda pairs, ctx: func_relatedness(pairs, ctx["go"], "BP"),
+    "functional_relatedness_MF": lambda pairs, ctx: func_relatedness(pairs, ctx["go"], "MF"),
+    "functional_relatedness_CC": lambda pairs, ctx: func_relatedness(pairs, ctx["go"], "CC"),
+    "same_species": lambda pairs, ctx: same_species_indicator(pairs, ctx["species"]),
+    # Node pair: proteins in PPI mode, Pfam families in DDI mode.
+    "self_interactions": lambda pairs, ctx: self_interactions(ctx["node_pairs"]),
+    "topology_shortcut": lambda pairs, ctx: topology_shortcut(ctx["node_pairs"], ctx["train_degree_ratio"]),
+    # DDI mode only.
+    "parent_degree": lambda pairs, ctx: parent_degree(pairs),
 }
+
+# Binary attributes, estimated with the contingency-table MI. Keep parent_degree out: contingency
+# MI on a high-cardinality A is biased upward and reports NMI with no label information.
+DISCRETE_ATTRIBUTES = {"self_interactions"}
 
 
 def write_mqc(attribute, results):
@@ -281,7 +307,11 @@ def main():
     ap.add_argument("--test_realistic", required=True)
     ap.add_argument("--blast", required=True)
     ap.add_argument("--embeddings", required=True)
-    ap.add_argument("--go_annotations", required=True)
+    ap.add_argument(
+        "--go_annotations",
+        default=None,
+        help="go_annotations.tsv from fetch_data; required for the functional_relatedness_* attributes",
+    )
     ap.add_argument("--species", default=None, help="species.tsv from fetch_data; required for same_species attribute")
     ap.add_argument("--seed", type=int, default=42)
     args = ap.parse_args()
@@ -309,10 +339,27 @@ def main():
             sys.exit("--species is required for the same_species attribute")
         species = load_species(args.species)
 
-    train_degree_ratio = None
+    train_degree_ratio, train_fams = None, None
     if args.attribute == "topology_shortcut":
         train_pairs, train_y = read_labelled_csv(args.train)
-        train_degree_ratio = build_train_degree_ratio(train_pairs, train_y)
+        train_fams = read_family_pairs(args.train)
+        if train_fams is None:
+            train_degree_ratio = build_train_degree_ratio(train_pairs, train_y)
+        else:
+            # DDI mode: count each distinct (family pair, label) once; instance rows repeat
+            # positives more often than negatives and would inflate the positive rate.
+            seen, nodes, labels = set(), [], []
+            for fam_pair, label in zip(train_fams, train_y):
+                key = (fam_pair, int(label))
+                if key not in seen:
+                    seen.add(key)
+                    nodes.append(fam_pair)
+                    labels.append(int(label))
+            print(
+                f"  DDI mode: {len(nodes)} distinct family pairs from {len(train_fams)} training rows",
+                file=sys.stderr,
+            )
+            train_degree_ratio = build_train_degree_ratio(nodes, np.array(labels))
 
     split_paths = [
         ("train", args.train),
@@ -325,14 +372,24 @@ def main():
     any_nontrain_qualified = False
     for split, path in split_paths:
         pairs, y = read_labelled_csv(path)
-        X, pairs_f, y_f = _prepare_split(pairs, y, embeddings)
+        fam_pairs = read_family_pairs(path)
+        X, pairs_f, y_f, mask = _prepare_split(pairs, y, embeddings)
 
         # A split can be empty (a 0 split fraction, or no pair with embeddings).
         if X.shape[0] == 0:
             print(f"  {split}: 0 pairs with embeddings -- skipping", file=sys.stderr)
             continue
 
-        A = compute(pairs_f, blast_sim, embeddings, go_anns, species, train_degree_ratio)
+        ctx = {
+            "blast_sim": blast_sim,
+            "embeddings": embeddings,
+            "go": go_anns,
+            "species": species,
+            "train_degree_ratio": train_degree_ratio,
+            # Filtered by the same mask as pairs_f so the two stay index-aligned.
+            "node_pairs": pairs_f if fam_pairs is None else [p for p, ok in zip(fam_pairs, mask) if ok],
+        }
+        A = compute(pairs_f, ctx)
 
         if args.attribute == "topology_shortcut":
             # Only pairs with at least one endpoint seen during training are
@@ -362,9 +419,10 @@ def main():
         print(f"  [{split}] NMI={r['nmi']:.4f}  ρ={r['detectability']:.4f}", file=sys.stderr)
 
     if args.attribute == "topology_shortcut" and not any_nontrain_qualified:
+        node = "Pfam family" if train_fams is not None else "protein"
         print(
-            "  topology_shortcut not applicable: no val/test_balanced/test_realistic "
-            "protein occurs in the training set (expected for leakage-aware splits) "
+            f"  topology_shortcut not applicable: no val/test_balanced/test_realistic "
+            f"{node} occurs in the training set (expected for leakage-aware splits) "
             "-- skipping output.",
             file=sys.stderr,
         )
