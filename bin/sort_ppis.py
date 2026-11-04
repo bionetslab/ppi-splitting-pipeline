@@ -14,7 +14,18 @@ import sys
 from collections import defaultdict
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from utils import mqc_category, read_fasta, read_node_mapping, read_partition, read_ppis, write_fasta, write_ppi_csv
+from utils import (
+    expand_members,
+    instances_by_family,
+    mqc_category,
+    read_fasta,
+    read_instances,
+    read_node_mapping,
+    read_partition,
+    read_ppis,
+    write_fasta,
+    write_ppi_csv,
+)
 
 
 def write_mqc(split_results, id_, n_ppis_discarded):
@@ -50,13 +61,26 @@ def main():
     ap.add_argument("--partition", required=True)
     ap.add_argument("--fasta", required=True)
     ap.add_argument("--node_mapping", required=True)
+    ap.add_argument(
+        "--instances",
+        help="instances.tsv (DDI mode only): maps families to clans and domain instances",
+    )
     args = ap.parse_args()
+
+    inst_rows = read_instances(args.instances) if args.instances else None
+    members = instances_by_family(inst_rows) if inst_rows else None
+    node_label = "families" if inst_rows else "proteins"
 
     node_to_prot = read_node_mapping(args.node_mapping)
     partition_list = read_partition(args.partition)
 
     # node_id is 1-indexed; partition_list is 0-indexed
     prot_to_part = {node_to_prot[nid]: partition_list[nid - 1] for nid in node_to_prot if nid - 1 < len(partition_list)}
+
+    # DDI mode: the partition is over clans; re-key it to families.
+    if inst_rows:
+        clan_to_part = prot_to_part
+        prot_to_part = {r["family"]: clan_to_part[r["clan"]] for r in inst_rows}
 
     ppis = read_ppis(args.ppis)
     seqs = read_fasta(args.fasta)
@@ -85,8 +109,8 @@ def main():
         rows = part_ppis[part] if part is not None else []
         proteins = {p for row in rows for p in (row["protein1"], row["protein2"])}
         write_ppi_csv(rows, f"{name}.csv")
-        write_fasta(seqs, proteins, f"{name}.fasta")
-        print(f"{name}: {len(rows)} PPIs, {len(proteins)} proteins", file=sys.stderr)
+        write_fasta(seqs, expand_members(proteins, members), f"{name}.fasta")
+        print(f"{name}: {len(rows)} PPIs, {len(proteins)} {node_label}", file=sys.stderr)
         split_results.append({"name": name, "n_ppis": len(rows), "n_proteins": len(proteins)})
 
     n_ppis_assigned = sum(r["n_ppis"] for r in split_results)

@@ -3,4 +3,4 @@ Hippie-regular,data/HIPPIE-current.csv,esm2,,,7200,7200,,,,,
 Hippie-ILP-split,data/HIPPIE-current.csv,esm2,ilp,100,7200,7200,,,,,
 Hippie-ILP-split-and-sampling,data/HIPPIE-current.csv,esm2,ilp,100,7200,7200,ilp,1,0.0,1,1
 Hippie-Leakage-split,data/HIPPIE-current.csv,esm2,random,,7200,7200,uniform,,,,
-Hippie-ILP-hcn,data/HIPPIE-current.csv,esm2,ilp,100,7200,7200,ilp,1,0,1,1,data/high_conf_neg.csv
+Hippie-ILP-hcn,data/HIPPIE-current.csv,esm2,ilp,100,7200,7200,ilp_candidates,1,0,1,1,data/high_conf_neg.csv
