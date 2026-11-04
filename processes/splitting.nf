@@ -1,3 +1,6 @@
+include { mqcRowLabel } from '../helpers/mqc_labels'
+
+// --id takes the row's MultiQC display label; publishDir paths still use meta.id.
 process SORT_PPIS {
     tag "${meta.id}"
 
@@ -51,7 +54,7 @@ process SPLIT_RANDOM {
         --val-split   ${meta.val_split} \\
         --test-split  ${meta.test_split} \\
         --seed        ${params.seed} \\
-        --id          ${meta.id}
+        --id          ${mqcRowLabel(meta)}
     """
 }
 
@@ -152,6 +155,6 @@ process REMOVE_REDUNDANT {
         --test_fasta     ${test_fasta} \\
         --sim_train_val  ${sim_train_val} \\
         --sim_train_test ${sim_train_test} \\
-        --id             ${meta.id}
+        --id             ${mqcRowLabel(meta)}
     """
 }

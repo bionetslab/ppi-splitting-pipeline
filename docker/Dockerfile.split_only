@@ -1,8 +1,8 @@
 # Smaller image for `--split_only` runs. It has no bin/, so it only works standalone:
 #   nextflow run main.nf --samplesheet s.csv --split_only \
 #       -with-docker ghcr.io/bionetslab/ppi-splitting-pipeline-split-only:latest
-# Covers GET_LENGTHS, SORT_PPIS, SOLVE_ILP, CDHIT2D, REMOVE_REDUNDANT,
-# SAMPLE_NEGATIVES_ILP and SAMPLE_NEGATIVES_DEGREE.
+# Covers GET_LENGTHS, EMPTY_GO_ANNOTATIONS, SORT_PPIS, SOLVE_ILP, CDHIT2D,
+# REMOVE_REDUNDANT, SAMPLE_NEGATIVES_ILP and SAMPLE_NEGATIVES_DEGREE.
 FROM mambaorg/micromamba:2.0.5
 
 USER root
