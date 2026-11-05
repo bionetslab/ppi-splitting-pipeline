@@ -9,10 +9,8 @@ library(cowplot)
 library(gridGraphics)
 library(Matrix)
 
-core_path <- "/path/to/ppi-splitting-pipeline/results_esm2/"
-path_to_results <- paste0(core_path, "multiqc_non_struc/")
-path_to_struc_results <- paste0(core_path, "multiqc_structural/")
-path_to_pdb_results <- paste0(core_path, "multiqc_PDB/")
+core_path <- "~/PythonProjects/ppi-splitting-pipeline/results_esm2/"
+path_to_robustness <- "~/PythonProjects/ppi-splitting-pipeline/results_robustness/"
 
 ##### Fig 2a: Bias analysis ######
 rename_map <- c(
@@ -129,30 +127,14 @@ ggsave("figures/fig2a_bias_analysis_leakage.pdf", width = 12, height = 5, dpi = 
 
 #### Figure 2b: Radar performance ####
 
-test_results_balanced <- fread(paste0(path_to_results, "multiqc_report_data/multiqc_classifier_metrics_test_balanced_table.txt"), sep="\t")
-test_results_balanced_struc <- fread(paste0(path_to_struc_results, "multiqc_report_data/multiqc_classifier_metrics_test_balanced_table.txt"), sep="\t")
-test_results_balanced_struc <- test_results_balanced_struc[!startsWith(Sample, "PDB")]
-test_results_balanced_pdb <- fread(paste0(path_to_pdb_results, "multiqc_report_data/multiqc_classifier_metrics_test_balanced_table.txt"), sep="\t")
-test_results_balanced <- rbind(test_results_balanced, test_results_balanced_struc)
-test_results_balanced <- rbind(test_results_balanced, test_results_balanced_pdb)
-test_results_balanced$Dataset <- sapply(stringr::str_split(test_results_balanced$Sample, "-", n = 2),`[`, 1)
-test_results_balanced$Category <- sapply(stringr::str_split(test_results_balanced$Sample, "-", n = 2),`[`, 2)
-test_results_balanced[, Category := factor(Category, levels = c("Leakage-split", "regular", "ILP-split", "ILP-split-and-sampling"))]
+metrics <- c("AUROC", "AUPRC", "F1", "MCC", "Precision", "Recall", "Accuracy")
 
-test_results_real <- fread(paste0(path_to_results, "multiqc_report_data/multiqc_classifier_metrics_test_realistic_table.txt"), sep="\t")
-test_results_real_struc <- fread(paste0(path_to_struc_results, "multiqc_report_data/multiqc_classifier_metrics_test_realistic_table.txt"), sep="\t")
-test_results_real_struc <- test_results_real_struc[!startsWith(Sample, "PDB")]
-test_results_real_pdb <- fread(paste0(path_to_pdb_results, "multiqc_report_data/multiqc_classifier_metrics_test_realistic_table.txt"), sep="\t")
-test_results_real <- rbind(test_results_real, test_results_real_struc)
-test_results_real <- rbind(test_results_real, test_results_real_pdb)
-test_results_real$Dataset <- sapply(stringr::str_split(test_results_real$Sample, "-", n = 2),`[`, 1)
-test_results_real$Category <- sapply(stringr::str_split(test_results_real$Sample, "-", n = 2),`[`, 2)
-test_results_real[, Category := factor(Category, levels = c("Leakage-split", "regular", "ILP-split", "ILP-split-and-sampling"))]
-
-test_results_balanced$TestSet <- "balanced"
-test_results_real$TestSet <- "realistic"
-
-only_leakage <- rbind(test_results_balanced, test_results_real)
+# Means over all seed combinations of the robustness runs
+robustness_runs <- rbindlist(lapply(Sys.glob(paste0(path_to_robustness, "*-Leakage-split/robustness/robustness_runs.tsv")),
+                                    fread, sep = "\t"))
+only_leakage <- robustness_runs[, lapply(.SD, mean),
+                                by = .(Dataset = sub("-.*", "", ID), TestSet = sub("test_", "", test_set)),
+                                .SDcols = metrics]
 rename_map_no_breaks <- c(
   Hippie     = "HIPPIE",
   Intact     = "IntAct",
@@ -175,12 +157,8 @@ only_leakage[, Dataset := factor(Dataset, levels = c("PDB-Dimers",
                                                      "STRING-experimental",
                                                      "STRING-textmining"))]
 
-only_leakage <- only_leakage[Category == "Leakage-split"]
-only_leakage <- only_leakage[, -c("Sample", "ID", "Category")]
-only_leakage <- only_leakage[order(AUROC)]
 only_leakage <- only_leakage[order(Dataset, TestSet)]
 
-metrics <- c("AUROC", "AUPRC", "F1", "MCC", "Precision", "Recall", "Accuracy")
 n <- length(metrics)
 
 get_radar_coords <- function(values, n) {
@@ -244,45 +222,25 @@ final_plot <- plot_grid(plotlist = c(panels, list(legend_panel)),
                         rel_widths = rep(1, 5),
                         rel_heights = rep(1, 2),
                         scale = 1)
-
 ggsave("figures/fig2b_radar.pdf", final_plot, width = 20, height = 8, dpi = 300)
 
 #### Figure 2c: Degree ####
 
-leakage_dirs <- c("Hippie", "Intact", "PDB_dimers", "Pinder", "String", "String900",
-                  "StringDB", "StringExp", "StringText")
-
-split_files <- c(
-  "Train" = "train.csv",
-  "Validation" = "val.csv",
-  "Test (balanced)" = "test_balanced.csv",
-  "Test (realistic)" = "test_realistic.csv"
-)
-
-load_leakage_split <- function(ds) {
-  base <- paste0(core_path, ds, "-Leakage-split/")
-  dt <- rbindlist(lapply(names(split_files), function(split_name) {
-    d <- fread(paste0(base, split_files[[split_name]]), select = c("protein1", "protein2", "label"))
-    d[, Split := split_name]
-    d
-  }))
-  dt[, Dataset := ds]
-  dt
+# Training degrees for every (split, sampling) seed combination of the robustness runs; the training seed plays no role
+load_train_degrees <- function(f) {
+  d <- fread(f, select = c("protein1", "protein2", "label"))
+  # a self-interaction (protein1 == protein2) counts once
+  long <- rbind(d[, .(protein = protein1, label)], d[protein1 != protein2, .(protein = protein2, label)])
+  long[, .(degree = .N), by = .(label, protein)][, `:=`(
+    Dataset = sub("-.*", "", basename(dirname(dirname(dirname(dirname(f)))))),
+    seeds   = paste(basename(dirname(dirname(f))), basename(dirname(f)))
+  )]
 }
 
-all_interactions <- rbindlist(lapply(leakage_dirs, load_leakage_split))
-
-all_interactions[, rowid := .I]
-protein_long <- melt(all_interactions, id.vars = c("rowid", "Dataset", "Split", "label"),
-                     measure.vars = c("protein1", "protein2"), value.name = "protein")
-# a self-interaction (protein1 == protein2) melts into two identical rows; dedup so it counts once
-protein_long <- unique(protein_long, by = c("rowid", "protein"))
-
-degree_dt <- protein_long[, .N, by = c("Dataset", "Split", "label", "protein")]
-setnames(degree_dt, "N", "degree")
+degree_dt <- rbindlist(lapply(Sys.glob(paste0(path_to_robustness, "*-Leakage-split/robustness/split*/sampling*/train.csv")),
+                              load_train_degrees))
 
 degree_dt[, label_lab := factor(ifelse(label == 1, "Positive", "Negative"), levels = c("Positive", "Negative"))]
-degree_dt[, Split := factor(Split, levels = c("Train", "Validation", "Test (balanced)", "Test (realistic)"))]
 
 degree_dt[Dataset %in% names(rename_map), Dataset := rename_map[Dataset]]
 degree_dt[, Dataset := factor(Dataset, levels = c("PDB-Dimers",
@@ -295,8 +253,8 @@ degree_dt[, Dataset := factor(Dataset, levels = c("PDB-Dimers",
                                                   "STRING-\nexperimental",
                                                   "STRING-\ntextmining"))]
 
-ggplot(degree_dt[degree <=100 & Split == "Train"], aes(x = degree, color = label_lab)) +
-  geom_freqpoly(binwidth=3, size=2) +
+ggplot(degree_dt[degree <=100], aes(x = degree, color = label_lab, group = interaction(label_lab, seeds))) +
+  geom_freqpoly(binwidth=3, linewidth=0.5) +  # one line per (split, sampling) seed combination
   facet_wrap(~Dataset, scales = "free", nrow=2) +
   scale_color_manual(values = c("Positive" = "#fe6100", "Negative" = "#785ef0")) +
   labs(x = "Degree", y = "Count", color = NULL, linetype = NULL) +
@@ -322,13 +280,29 @@ rename_map_short <- c(
   Pinder  = "PINDER"
 )
 
-self_inter <- all_interactions[, .(
-  total = .N,
-  self_N = sum(protein1 == protein2)
-), by = c("Dataset", "label", "Split")]
-self_inter[, ratio := self_N / total]
-# 0-count groups can't be shown on a log scale; floor them to a half-count instead of dropping them
-self_inter[, ratio_plot := ifelse(self_N == 0, 0.5 / total, ratio)]
+# Every split file of every (split, sampling) seed combination of the Maximally biased robustness runs
+split_names <- c(train = "Train", val = "Validation", test_balanced = "Test (balanced)", test_realistic = "Test (realistic)")
+leakage_runs <- data.table(file = Sys.glob(paste0(path_to_robustness, "*-Leakage-split/robustness/split*/sampling*/*.csv")))
+leakage_runs[, `:=`(
+  Dataset = sub("-.*", "", basename(dirname(dirname(dirname(dirname(file)))))),
+  seeds   = paste(basename(dirname(dirname(file))), basename(dirname(file))),
+  Split   = split_names[sub(".csv", "", basename(file), fixed = TRUE)]
+)]
+
+# Applies stat(pairs, dataset) to each run file, one file at a time to keep memory bounded
+per_run <- function(runs, stat) {
+  rbindlist(lapply(seq_len(nrow(runs)), function(i) {
+    d <- fread(runs$file[i], select = c("protein1", "protein2", "label"))
+    stat(d, runs$Dataset[i])[, `:=`(Dataset = runs$Dataset[i], Split = runs$Split[i], seeds = runs$seeds[i])]
+  }))
+}
+
+self_runs <- per_run(leakage_runs, function(d, ds) d[, .(total = .N, ratio = mean(protein1 == protein2)), by = label])
+# One row (= one point) per (split, sampling) seed combination
+self_inter <- self_runs
+
+# Offsets the splits vertically within each dataset row
+split_dodge <- position_dodge(width = 0.7)
 
 self_inter[, label_lab := factor(ifelse(label == 1, "Positive", "Negative"), levels = c("Positive", "Negative"))]
 self_inter[, Split := factor(Split, levels = c("Train", "Validation", "Test (balanced)", "Test (realistic)"))]
@@ -337,13 +311,10 @@ self_inter[Dataset %in% names(rename_map_short), Dataset := rename_map_short[Dat
 dataset_order <- self_inter[label_lab == "Positive", .(m = mean(ratio)), by = Dataset][order(m)]$Dataset
 self_inter[, Dataset := factor(Dataset, levels = dataset_order)]
 
-wide <- dcast(self_inter, Dataset + Split ~ label_lab, value.var = "ratio_plot")
 
 ggplot() +
-  geom_segment(data = wide, aes(x = Positive, xend = Negative, y = Dataset, yend = Dataset, group = Split),
-               color = "grey85", linewidth = 0.5) +
-  geom_point(data = self_inter, aes(x = ratio_plot, y = Dataset, color = label_lab, shape = Split),
-             size = 3, alpha = 0.9) +
+  geom_point(data = self_inter, aes(x = ratio, y = Dataset, color = label_lab, shape = Split, group = Split),
+             size = 2) +
   scale_color_manual(values = c("Positive" = "#fe6100", "Negative" = "#785ef0")) +
   labs(x = "Proportion of self-interactions", y = NULL,
        color = NULL, shape = NULL,) +
@@ -359,8 +330,7 @@ ggsave("figures/fig2d_self_interactions.pdf", width = 9, height = 3.5, dpi = 300
 #### Suppl. Figure: Similarity ####
 
 load_sim <- function(ds) {
-  base <- paste0("~/PythonProjects/ppi-splitting-pipeline/results_esm2/", ds, "-Leakage-split/")
-  dt <- fread(paste0(base, "similarities/all_vs_all.tsv"), sep="\t")
+  dt <- fread(paste0(path_to_robustness, ds, "-Leakage-split/similarities/all_vs_all.tsv"), sep="\t")
   colnames(dt) <- c("protein1", "protein2", "evalue", "bitscore", "pident")
   if(!ds %in% c("PDB_dimers", "Pinder")){
     dt[, protein2 := gsub(pattern="sp|", replacement="", x=protein2, fixed=TRUE)]
@@ -372,17 +342,19 @@ load_sim <- function(ds) {
   dt
 }
 
-all_sim <- rbindlist(lapply(c(leakage_dirs), load_sim))
-all_sim <- unique(all_sim)
-all_sim_inter <- merge(all_interactions, all_sim, all.x = TRUE,
-                       by.x = c("protein1", "protein2"), 
-                       by.y = c("protein1", "protein2"))
-all_sim_inter <- all_sim_inter[is.na(bitscore), bitscore := 0]
-all_sim_inter <- all_sim_inter[is.na(evalue), evalue := 11]
-all_sim_inter <- all_sim_inter[is.na(pident), pident := 0]
-all_sim_inter[, label_lab := factor(ifelse(label == 1, "Positive", "Negative"), levels = c("Positive", "Negative"))]
-all_sim_inter[Dataset %in% names(rename_map), Dataset := rename_map[Dataset]]
-all_sim_inter[, Dataset := factor(Dataset, levels = c("PDB-Dimers",
+# % identity of the training pairs of one seed combination (split 1234, sampling 42; training seed irrelevant here);
+# pairs without a BLAST hit count as 0 %
+sim_pairs <- rbindlist(lapply(unique(leakage_runs$Dataset), function(ds) {
+  sim <- unique(load_sim(ds)[, .(protein1, protein2, pident)])
+  per_run(leakage_runs[Dataset == ds & Split == "Train" & seeds == "split1234 sampling42"], function(d, ds) {
+    d <- merge(d, sim, by = c("protein1", "protein2"), all.x = TRUE)
+    d[is.na(pident), pident := 0]
+    d[, .(label, pident)]
+  })
+}))
+sim_pairs[, label_lab := factor(ifelse(label == 1, "Positive", "Negative"), levels = c("Positive", "Negative"))]
+sim_pairs[Dataset %in% names(rename_map), Dataset := rename_map[Dataset]]
+sim_pairs[, Dataset := factor(Dataset, levels = c("PDB-Dimers",
                                                       "PINDER",
                                                       "IntAct",
                                                       "HIPPIE",
@@ -392,42 +364,41 @@ all_sim_inter[, Dataset := factor(Dataset, levels = c("PDB-Dimers",
                                                       "STRING-\nexperimental",
                                                       "STRING-\ntextmining"))]
 
-ggplot(all_sim_inter[Split == "Train"], aes(x = pident, fill = label_lab)) +
+ggplot(sim_pairs, aes(x = pident, fill = label_lab)) +
   geom_histogram(bins=20, position='dodge') +
+  scale_y_continuous(trans = "log1p", breaks = c(0, 100, 1000, 10000, 100000))+
   facet_wrap(~Dataset, scales = "free_y", nrow=2) +
-  #scale_x_log10() +
   scale_fill_manual(values = c("Positive" = "#fe6100", "Negative" = "#785ef0")) +
   labs(x = NULL, y = NULL, fill = NULL, linetype = NULL) +
   theme_minimal(base_size = 22)
-ggsave("figures/fig_similarity.pdf", width = 16, height = 5, dpi = 300)
+ggsave("figures/FigureA1.pdf", width = 16, height = 5, dpi = 300)
 
 #### Figure 2e: Taxonomy ####
 
 load_tax <- function(ds) {
   if(!ds %in% c("PDB_dimers", "Pinder")){
-    base <- paste0("~/PythonProjects/ppi-splitting-pipeline/results_esm2/", ds, "-Leakage-split/")
-    dt <- fread(paste0(base, "data/species.tsv"), sep="\t")
+    dt <- fread(paste0(path_to_robustness, ds, "-Leakage-split/data/species.tsv"), sep="\t")
   }else if(ds == "PDB_dimers"){
-    dt <- fread("~/PythonProjects/ppi-splitting-pipeline/data/pdb_dimers_species.tsv", sep="\t")
+    dt <- fread("~/PythonProjects/ppi-splitting-pipeline/data/data/pdb_dimers_species.tsv", sep="\t")
   }else{
-    dt <- fread("~/PythonProjects/ppi-splitting-pipeline/data/pinder_species.tsv", sep="\t")
+    dt <- fread("~/PythonProjects/ppi-splitting-pipeline/data/data/pinder_species.tsv", sep="\t")
   }
   dt
 }
 
-all_tax <- rbindlist(lapply(c("PDB_dimers", "Pinder", "IntAct"), load_tax))
+tax_datasets <- intersect(c("PDB_dimers", "Pinder", "Intact"), leakage_runs$Dataset)
+all_tax <- rbindlist(lapply(tax_datasets, load_tax))
 all_tax <- unique(all_tax)
-all_tax_inter <- merge(all_interactions[Dataset %in% c("PDB_dimers", "Pinder", "Intact")], all_tax, by.x = "protein1", by.y = "protein_id")
-setnames(all_tax_inter, "taxon_id", "taxon1")
-all_tax_inter <- merge(all_tax_inter, all_tax, by.x = "protein2", by.y = "protein_id")
-setnames(all_tax_inter, "taxon_id", "taxon2")
-all_tax_inter <- all_tax_inter[!is.na(taxon1)]
-all_tax_inter <- all_tax_inter[!is.na(taxon2)]
-tax_count <- all_tax_inter[, .(
-  total = .N,
-  same_tax = sum(taxon1 == taxon2)
-), by = c("Dataset", "label", "Split")]
-tax_count[, ratio := same_tax / total]
+
+tax_runs <- per_run(leakage_runs[Dataset %in% tax_datasets], function(d, ds) {
+  d <- merge(d, all_tax, by.x = "protein1", by.y = "protein_id")
+  setnames(d, "taxon_id", "taxon1")
+  d <- merge(d, all_tax, by.x = "protein2", by.y = "protein_id")
+  setnames(d, "taxon_id", "taxon2")
+  d[!is.na(taxon1) & !is.na(taxon2), .(ratio = mean(taxon1 == taxon2)), by = label]
+})
+# One row (= one point) per (split, sampling) seed combination
+tax_count <- tax_runs
 
 tax_count[, label_lab := factor(ifelse(label == 1, "Positive", "Negative"), levels = c("Positive", "Negative"))]
 tax_count[, Split := factor(Split, levels = c("Train", "Validation", "Test (balanced)", "Test (realistic)"))]
@@ -436,13 +407,10 @@ tax_count[Dataset %in% names(rename_map), Dataset := rename_map[Dataset]]
 dataset_order <- tax_count[label_lab == "Positive", .(m = mean(ratio)), by = Dataset][order(m)]$Dataset
 tax_count[, Dataset := factor(Dataset, levels = dataset_order)]
 
-wide <- dcast(tax_count, Dataset + Split ~ label_lab, value.var = "ratio")
 
 ggplot() +
-  geom_segment(data = wide, aes(x = Positive, xend = Negative, y = Dataset, yend = Dataset, group = Split),
-               color = "grey85", linewidth = 0.5) +
-  geom_point(data = tax_count, aes(x = ratio, y = Dataset, color = label_lab, shape = Split),
-             size = 3, alpha = 0.9) +
+  geom_point(data = tax_count, aes(x = ratio, y = Dataset, color = label_lab, shape = Split, group = Split),
+             size = 2) +
   scale_color_manual(values = c("Positive" = "#fe6100", "Negative" = "#785ef0")) +
   labs(x = "Proportion of same-species interactions", y = NULL,
        color = NULL, shape = NULL,) +
@@ -478,39 +446,39 @@ build_go_sparse <- function(go, term_col) {
   list(M = M, protein_index = protein_index, sizes = Matrix::rowSums(M))
 }
 
-pooled_interactions <- all_interactions
+go_categories <- c("GO-BP" = "go_bp", "GO-MF" = "go_mf", "GO-CC" = "go_cc")
 
-jaccard_for_dataset <- function(ds, term_col) {
-  path <- path.expand(paste0(core_path, ds, "-Leakage-split/data/go_annotations.tsv"))
+jaccard_for_dataset <- function(ds) {
+  path <- path.expand(paste0(path_to_robustness, ds, "-Leakage-split/data/go_annotations.tsv"))
   if (ds == "Pinder") {
-    path <- "../../data/pinder_go_annotations.tsv"
+    path <- "~/PythonProjects/ppi-splitting-pipeline/data/data/pinder_go_annotations.tsv"
   }else if (ds == "PDB_dimers"){
-    path <- "../../data/pdbdimers_go_annotations.tsv"
+    path <- "~/PythonProjects/ppi-splitting-pipeline/data/data/pdb_dimers_go_annotations.tsv"
   }
-  go <- fread(path, select = c("protein_id", term_col))
-  built <- build_go_sparse(go, term_col)
+  go <- fread(path, select = c("protein_id", unname(go_categories)))
+  built <- lapply(go_categories, function(term_col) build_go_sparse(go, term_col))
 
-  sub <- pooled_interactions[Dataset == ds]
-  idx1 <- built$protein_index[sub$protein1]
-  idx1[is.na(idx1)] <- built$protein_index["___NONE___"]
-  idx2 <- built$protein_index[sub$protein2]
-  idx2[is.na(idx2)] <- built$protein_index["___NONE___"]
+  per_run(leakage_runs[Dataset == ds], function(d, ds) {
+    rbindlist(lapply(names(built), function(category) {
+      b <- built[[category]]
+      idx1 <- b$protein_index[d$protein1]
+      idx1[is.na(idx1)] <- b$protein_index["___NONE___"]
+      idx2 <- b$protein_index[d$protein2]
+      idx2[is.na(idx2)] <- b$protein_index["___NONE___"]
 
-  inter <- Matrix::rowSums(built$M[idx1, , drop = FALSE] * built$M[idx2, , drop = FALSE])
-  union_size <- built$sizes[idx1] + built$sizes[idx2] - inter
-  jaccard <- ifelse(union_size == 0, 0, inter / union_size)
-  data.table(Dataset = ds, label = sub$label, jaccard = jaccard, Split = sub$Split)
+      inter <- Matrix::rowSums(b$M[idx1, , drop = FALSE] * b$M[idx2, , drop = FALSE])
+      union_size <- b$sizes[idx1] + b$sizes[idx2] - inter
+      jaccard <- ifelse(union_size == 0, 0, inter / union_size)
+      data.table(label = d$label, jaccard = jaccard)[, .(mean_jaccard = mean(jaccard)), by = label][, Category := category]
+    }))
+  })
 }
 
-jac_raw <- rbindlist(lapply(list(c("go_bp", "GO-BP"), c("go_mf", "GO-MF"), c("go_cc", "GO-CC")),
-                            function(x) {
-                              dt <- rbindlist(lapply(leakage_dirs, jaccard_for_dataset, term_col = x[1]))
-                              dt[, Category := x[2]]
-                              dt
-                            }))
+jac_runs <- rbindlist(lapply(unique(leakage_runs$Dataset), jaccard_for_dataset))
 
-jac_raw[, label_lab := factor(ifelse(label == 1, "Positive", "Negative"), levels = c("Positive", "Negative"))]
-jac_summary <- jac_raw[, .(mean_jaccard = mean(jaccard)), by = c("Dataset", "label_lab", "Category", "Split")]
+jac_runs[, label_lab := factor(ifelse(label == 1, "Positive", "Negative"), levels = c("Positive", "Negative"))]
+# One row (= one point) per (split, sampling) seed combination
+jac_summary <- jac_runs
 
 jac_summary[Dataset %in% names(rename_map_short), Dataset := rename_map_short[Dataset]]
 jac_summary[, Dataset := factor(Dataset, levels = rev(c("PDB-Dimers",
@@ -523,13 +491,14 @@ jac_summary[, Dataset := factor(Dataset, levels = rev(c("PDB-Dimers",
                                                  "STRING-exp",
                                                  "STRING-text")))]
 jac_summary[, Category := factor(Category, levels = c("GO-BP", "GO-MF", "GO-CC"))]
+jac_summary[, Split := factor(Split, levels = split_names)]
 
 
-jac_wide <- dcast(jac_summary, Dataset + Category + Split ~ label_lab, value.var = "mean_jaccard")
+jac_wide <- dcast(jac_summary, Dataset + Category + Split ~ label_lab, value.var = "mean_jaccard", fun.aggregate = mean)  # mean over seed combinations
 
 ggplot() +
-  geom_point(data = jac_summary, aes(x = mean_jaccard, y = Dataset, color = label_lab, shape = Split),
-             size = 3, alpha = 0.9) +
+  geom_point(data = jac_summary, aes(x = mean_jaccard, y = Dataset, color = label_lab, shape = Split, group = Split),
+             size = 2) +
   facet_wrap(~Category, nrow = 2) +
   scale_color_manual(values = c("Positive" = "#fe6100", "Negative" = "#785ef0")) +
   labs(x = "Jaccard index of the GO sets", y = NULL, color = NULL) +
