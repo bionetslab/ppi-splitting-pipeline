@@ -21,19 +21,26 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from sort_ppis import write_mqc
-from utils import read_fasta, read_ppis, write_fasta, write_ppi_csv
+from utils import expand_members, instances_by_family, read_fasta, read_instances, read_ppis, write_fasta, write_ppi_csv
 
 
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--ppis", required=True)
     ap.add_argument("--fasta", required=True)
+    ap.add_argument(
+        "--instances",
+        help="instances.tsv (DDI mode only): expands families to domain instances in the split FASTAs",
+    )
     ap.add_argument("--train-split", type=float, default=0.8)
     ap.add_argument("--val-split", type=float, default=0.1)
     ap.add_argument("--test-split", type=float, default=0.1)
     ap.add_argument("--seed", type=int, default=42)
     ap.add_argument("--id", required=True, help="Dataset ID, for MultiQC tagging")
     args = ap.parse_args()
+
+    members = instances_by_family(read_instances(args.instances)) if args.instances else None
+    node_label = "families" if members else "proteins"
 
     ppis = read_ppis(args.ppis)
     seqs = read_fasta(args.fasta)
@@ -60,8 +67,8 @@ def main():
     for name, rows in buckets.items():
         proteins = {p for row in rows for p in (row["protein1"], row["protein2"])}
         write_ppi_csv(rows, f"{name}.csv")
-        write_fasta(seqs, proteins, f"{name}.fasta")
-        print(f"{name}: {len(rows)} PPIs, {len(proteins)} proteins", file=sys.stderr)
+        write_fasta(seqs, expand_members(proteins, members), f"{name}.fasta")
+        print(f"{name}: {len(rows)} PPIs, {len(proteins)} {node_label}", file=sys.stderr)
         split_results.append({"name": name, "n_ppis": len(rows), "n_proteins": len(proteins)})
 
     # Random splitting never discards a PPI, by construction.

@@ -19,7 +19,7 @@ import numpy as np
 from sklearn.ensemble import RandomForestClassifier
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from utils import load_embeddings, read_labelled_csv
+from utils import load_embeddings, mqc_dataset, read_labelled_csv
 from sklearn.metrics import (
     accuracy_score,
     average_precision_score,
@@ -96,7 +96,7 @@ def write_mqc(results, id_):
             )
             # metrics is None for an empty or single-class split: blank cells.
             row = "\t".join("" if metrics is None else f"{metrics[c]:.4f}" for c in cols)
-            fh.write(f"{id_}\t{id_}\t{row}\n")
+            fh.write(f"{mqc_dataset(id_)}\t{id_}\t{row}\n")
 
 
 def main():
