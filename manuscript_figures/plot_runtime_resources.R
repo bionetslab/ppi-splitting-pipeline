@@ -4,7 +4,7 @@ library(stringr)
 library(cowplot)
 library(scales)
 
-repo <- "~/PythonProjects/ppi-splitting-pipeline/"
+repo <- "/path/to/project/ppi-splitting-pipeline/"
 # One figure per embedding; each concatenates several Nextflow reports (missing ones are skipped)
 report_paths <- list(
   esm2 = paste0(repo, "results_robustness/", c("runtime_robustness.html", "runtime_robustness_struc.html",

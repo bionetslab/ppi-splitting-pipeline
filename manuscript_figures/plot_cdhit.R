@@ -2,8 +2,8 @@ library(data.table)
 library(ggplot2)
 library(stringr)
 
-path_to_robustness <- "~/PythonProjects/ppi-splitting-pipeline/results_robustness/"
-path_to_input <- "~/PythonProjects/ppi-splitting-pipeline/data/data/"
+path_to_robustness <- "/path/to/project/ppi-splitting-pipeline/results_robustness/"
+path_to_input <- "/path/to/project/ppi-splitting-pipeline/data/data/"
 
 pop_sd <- function(x) sqrt(mean((x - mean(x))^2))  # population SD, as in bin/robustness_summary.py
 

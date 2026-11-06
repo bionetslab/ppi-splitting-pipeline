@@ -32,6 +32,7 @@ from sample_negatives_ilp import (  # noqa: E402
     build_candidate_set,
     build_context,
     build_protein_index,
+    load_candidate_network,
     load_go_bp,
     load_species,
     pos_pairs_from_rows,
@@ -51,7 +52,7 @@ def read_labelled(path):
     return pos, neg
 
 
-def reconstruct(split, csv_path, lambdas, seed, species_path, go_path):
+def reconstruct(split, csv_path, lambdas, seed, species_path, go_path, candidate_network=None):
     """Return one diagnostics row, rebuilding the context exactly like sample_negatives_ilp.sample_negatives_ilp()."""
     pos_rows, neg_rows = read_labelled(csv_path)
     cfg = SamplingConfig(**lambdas, seed=seed, max_candidates=4 * len(pos_rows))
@@ -67,9 +68,13 @@ def reconstruct(split, csv_path, lambdas, seed, species_path, go_path):
         go_bp = load_go_bp(go_path, protein_to_idx)
         go_membership, go_sizes = _build_go_membership(go_bp)
 
-    candidates = build_candidate_set(len(protein_to_idx), pos_pairs, cfg, max_candidates=cfg.max_candidates,
-                                     seed=cfg.seed, taxon_codes=taxonomy_codes, go_membership=go_membership,
-                                     go_sizes=go_sizes)
+    if candidate_network is not None:  # same branch as sample_negatives_ilp.sample_negatives_ilp()
+        pos_pairs_set = {tuple(p) for p in pos_pairs.tolist()}
+        candidates = load_candidate_network(candidate_network, protein_to_idx, pos_pairs_set, cfg)
+    else:
+        candidates = build_candidate_set(len(protein_to_idx), pos_pairs, cfg, max_candidates=cfg.max_candidates,
+                                         seed=cfg.seed, taxon_codes=taxonomy_codes, go_membership=go_membership,
+                                         go_sizes=go_sizes)
     ctx = build_context(pos_pairs, protein_to_idx, idx_to_protein, candidates, 1.0, species_path=species_path,
                         go_annotations_path=go_path, taxonomy_codes=taxonomy_codes, n_taxa=n_taxa, go_bp=go_bp)
 
@@ -137,12 +142,16 @@ def main():
                                for c in ("species", "go_annotations"))
             else:
                 species, go = run_dir / "data" / "species.tsv", run_dir / "data" / "go_annotations.tsv"
+            network = ss.get("candidate_network") or None
+            if network and args.data_dir is not None:
+                network = args.data_dir / Path(network).name
             for seed_dir in sorted(run_dir.glob("robustness/split*/sampling*")):
                 split_seed = int(seed_dir.parent.name.removeprefix("split"))
                 sampling_seed = int(seed_dir.name.removeprefix("sampling"))
                 for split in SPLITS:
                     print(f"{id_} {split_seed}/{sampling_seed} {split} ...", file=sys.stderr, flush=True)
-                    row = reconstruct(split, seed_dir / f"{split}.csv", lambdas_from(ss), sampling_seed, species, go)
+                    row = reconstruct(split, seed_dir / f"{split}.csv", lambdas_from(ss), sampling_seed, species, go,
+                                      network)
                     rows.append({"Sample": f"{mqc_sample(id_, split)}_split{split_seed}_sampling{sampling_seed}",
                                  "ID": id_, "split_seed": split_seed, "sampling_seed": sampling_seed, **row})
 

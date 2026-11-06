@@ -9,8 +9,8 @@ library(cowplot)
 library(gridGraphics)
 library(Matrix)
 
-core_path <- "~/PythonProjects/ppi-splitting-pipeline/results_esm2/"
-path_to_robustness <- "~/PythonProjects/ppi-splitting-pipeline/results_robustness/"
+path_robustness_bias <- "/path/to/project/ppi-splitting-pipeline/results_robustness_bias/"
+path_to_robustness <- "/path/to/project/ppi-splitting-pipeline/results_robustness/"
 
 ##### Fig 2a: Bias analysis ######
 rename_map <- c(
@@ -25,11 +25,11 @@ rename_map <- c(
   Pinder  = "PINDER"
 )
 
-all_biases <- lapply(list.files(core_path, pattern="*mqc.tsv", full.names=TRUE, recursive=TRUE), fread)
-names(all_biases) <- list.files(core_path, pattern="*mqc.tsv", full.names=TRUE, recursive=TRUE)
+all_biases <- lapply(list.files(path_robustness_bias, pattern="*mqc.tsv", full.names=TRUE, recursive=TRUE), fread)
+names(all_biases) <- list.files(path_robustness_bias, pattern="*mqc.tsv", full.names=TRUE, recursive=TRUE)
 
 all_biases <- rbindlist(all_biases, idcol="filename")
-all_biases[, filename := gsub(paste0(core_path, "/"), "", filename, fixed=TRUE)]
+all_biases[, filename := gsub(paste0(path_robustness_bias, "/"), "", filename, fixed=TRUE)]
 all_biases[, filename := gsub("multiqc/", "", filename, fixed=TRUE)]
 all_biases[, filename := gsub("_bias_mqc.tsv", "", filename, fixed=TRUE)]
 all_biases[, c("Sample", "Bias") := tstrsplit(filename, "/")]
@@ -379,9 +379,9 @@ load_tax <- function(ds) {
   if(!ds %in% c("PDB_dimers", "Pinder")){
     dt <- fread(paste0(path_to_robustness, ds, "-Leakage-split/data/species.tsv"), sep="\t")
   }else if(ds == "PDB_dimers"){
-    dt <- fread("~/PythonProjects/ppi-splitting-pipeline/data/data/pdb_dimers_species.tsv", sep="\t")
+    dt <- fread("/path/to/project/ppi-splitting-pipeline/data/data/pdb_dimers_species.tsv", sep="\t")
   }else{
-    dt <- fread("~/PythonProjects/ppi-splitting-pipeline/data/data/pinder_species.tsv", sep="\t")
+    dt <- fread("/path/to/project/ppi-splitting-pipeline/data/data/pinder_species.tsv", sep="\t")
   }
   dt
 }
@@ -451,9 +451,9 @@ go_categories <- c("GO-BP" = "go_bp", "GO-MF" = "go_mf", "GO-CC" = "go_cc")
 jaccard_for_dataset <- function(ds) {
   path <- path.expand(paste0(path_to_robustness, ds, "-Leakage-split/data/go_annotations.tsv"))
   if (ds == "Pinder") {
-    path <- "~/PythonProjects/ppi-splitting-pipeline/data/data/pinder_go_annotations.tsv"
+    path <- "/path/to/project/ppi-splitting-pipeline/data/data/pinder_go_annotations.tsv"
   }else if (ds == "PDB_dimers"){
-    path <- "~/PythonProjects/ppi-splitting-pipeline/data/data/pdb_dimers_go_annotations.tsv"
+    path <- "/path/to/project/ppi-splitting-pipeline/data/data/pdb_dimers_go_annotations.tsv"
   }
   go <- fread(path, select = c("protein_id", unname(go_categories)))
   built <- lapply(go_categories, function(term_col) build_go_sparse(go, term_col))

@@ -2,13 +2,9 @@ library(data.table)
 library(ggplot2)
 library(dplyr)
 
-core_path <- "~/PythonProjects/ppi-splitting-pipeline/results_prott5/"
-core_path_others <- "~/PythonProjects/ppi-splitting-pipeline/results_esm2/"
+core_path <- "/path/to/project/ppi-splitting-pipeline/results_prott5/"
+core_path_others <- "/path/to/project/ppi-splitting-pipeline/results_robustness_bias/"  # ESM-2 bias-only run on the 1234/42 robustness splits
 path_to_prott5_results <- paste0(core_path, "multiqc/")
-path_to_results <- paste0(core_path_others, "multiqc_non_struc/")
-path_to_struc_results <- paste0(core_path_others, "multiqc_structural/")
-path_to_pdb_results <- paste0(core_path_others, "multiqc_PDB/")
-path_to_hcn_results <- paste0(core_path_others, "multiqc_hcn/")
 
 
 ##### Bias analysis ######
@@ -109,7 +105,7 @@ ggplot(only_leakage[Bias == "Embedding Similarity"], aes(
   labs(x = "Embedding", y = "Utility")+
   theme_minimal()+
   theme(axis.text.x = element_text(angle = 90))
-ggsave("figures/prott5_nmi_comp_leakage.pdf", width=9, height=4)
+ggsave("figures/FigureB1.pdf", width=9, height=4)
 
 ggplot(comparison, aes(x = Bias, y = `Detectability ESM2 - Detectability ProtT5`, color = Split))+
   geom_point()+
@@ -123,14 +119,14 @@ ggplot(comparison, aes(x = Bias, y = `Detectability ESM2 - Detectability ProtT5`
   )) +
   theme_minimal()+
   theme(axis.text.x = element_text(angle = 90))
-ggsave("figures/prott5_detectability_comp_leakage.pdf", width=8, height=5)
+ggsave("figures/FigureB2.pdf", width=8, height=5)
 
 ### Random Forest comparison ####
 test_results_balanced_prott5 <- fread(paste0(path_to_prott5_results, "multiqc_report_data/multiqc_classifier_metrics_test_balanced_table.txt"), sep="\t")
 test_results_balanced_prott5$embedding <- "ProtT5"
 
 # ESM-2: robustness runs with split seed 1234, sampling seed 42, training seed 42 (the pipeline defaults)
-path_to_robustness <- "~/PythonProjects/ppi-splitting-pipeline/results_robustness/"
+path_to_robustness <- "/path/to/project/ppi-splitting-pipeline/results_robustness/"
 esm2_runs <- rbindlist(lapply(Sys.glob(paste0(path_to_robustness, "*/robustness/robustness_runs.tsv")), fread, sep = "\t"))
 esm2_runs <- esm2_runs[split_seed == 1234 & sampling_seed == 42 & training_seed == 42]
 esm2_runs[, `:=`(Sample = ID, embedding = "ESM-2")]
@@ -258,5 +254,5 @@ plots_row <- plot_grid(p_balanced, p_realistic, nrow = 1,
 # Stack the row of plots on top of the shared legend
 final_plot <- plot_grid(plots_row, shared_legend, ncol = 1, rel_heights = c(1, 0.1))
 final_plot
-ggsave("figures/prott5_rf_comparison.pdf", height=6, width=8)
+ggsave("figures/FigureB3.pdf", height=6, width=8)
 
