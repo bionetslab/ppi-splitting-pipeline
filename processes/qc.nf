@@ -23,7 +23,7 @@ process BIAS_ANALYSIS {
         --embeddings      ${embeddings} \\
         --go_annotations  ${go_annotations} \\
         --species         ${species} \\
-        --seed            ${params.seed}
+        --seed            ${params.bias_seed}
     """
 }
 
@@ -60,8 +60,32 @@ process SIMILARITY_HEATMAP {
         --test_fasta  ${test_fasta} \\
         --blast       ${blast_tsv} \\
         --max_per_split ${params.heatmap_max_per_split} \\
-        --seed        ${params.seed} \\
+        --seed        ${params.bias_seed} \\
         --id          ${id}
+    """
+}
+
+// --robustness_test: aggregates one dataset's classifier metrics over every
+// (split, sampling, training) seed combination. seeds[i] holds the
+// [split, sampling, training] seeds of metrics[i]; both lists come from the
+// same groupTuple(), so their order matches.
+process ROBUSTNESS_SUMMARY {
+    publishDir(path: { "${params.outdir}/${id}/robustness" }, mode: 'copy')
+    tag "${id}_robustness"
+
+    input:
+    tuple val(id), val(seeds), path(metrics, stageAs: "?/*")
+
+    output:
+    tuple val(id), path("robustness_summary_mqc.tsv"), emit: mqc
+    path "robustness_runs.tsv"
+
+    script:
+    def files = metrics instanceof List ? metrics : [metrics]
+    def rows = [files, seeds].transpose().collect { f, s -> ([f] + s).join(' ') }.join(' ')
+    """
+    printf '%s\\t%s\\t%s\\t%s\\n' file split_seed sampling_seed training_seed ${rows} > manifest.tsv
+    robustness_summary.py --manifest manifest.tsv --id ${id}
     """
 }
 

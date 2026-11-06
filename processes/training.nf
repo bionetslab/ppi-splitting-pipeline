@@ -23,7 +23,9 @@ process EMBED_SEQUENCES {
 }
 
 process TRAIN_CLASSIFIER {
-    tag "${meta.id}"
+    // Normal runs report the metrics through MultiQC only; --robustness_test also keeps every combination's metrics.
+    publishDir(path: { "${params.outdir}/${meta.id}/robustness/split${meta.split_seed}/sampling${meta.sampling_seed}/training${meta.training_seed}" }, mode: 'copy', enabled: params.robustness_test)
+    tag "${meta.id}: seeds ${meta.split_seed}/${meta.sampling_seed}/${meta.training_seed}"
     label 'error_retry'
 
     input:
@@ -40,7 +42,7 @@ process TRAIN_CLASSIFIER {
         --test_balanced  ${test_balanced_csv} \\
         --test_realistic ${test_realistic_csv} \\
         --embeddings     ${embeddings} \\
-        --seed           ${params.seed} \\
+        --seed           ${meta.training_seed} \\
         --id             ${meta.id}
     """
 }

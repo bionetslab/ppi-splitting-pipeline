@@ -221,7 +221,7 @@ def analyse(A, X, y, name, seed=42, n_bins=10):
     if X.shape[0] < 10:
         detectability = 0.0
     else:
-        reg = Ridge(alpha=1.0, solver="sag", random_state=seed, max_iter=1000)
+        reg = Ridge(alpha=1.0, solver="cholesky", random_state=seed, max_iter=1000)
         reg.fit(X, A)
         detectability = float(spearmanr(A, reg.predict(X))[0])
 

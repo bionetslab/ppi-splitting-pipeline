@@ -10,6 +10,8 @@ include { SAMPLE_NEGATIVES } from './subworkflows/sample_negatives'
 include { TRAIN_BASELINE }   from './subworkflows/train_baseline'
 include { QC }               from './subworkflows/qc'
 include { BIAS_DIAGNOSTICS } from './subworkflows/bias_diagnostics'
+include { ROBUSTNESS }       from './subworkflows/robustness'
+include { expandSeeds }      from './functions/seeds'
 
 def isGiven(v) {
     !(v == null || v == [])
@@ -102,6 +104,10 @@ def buildDatasetsChannel() {
 }
 
 workflow {
+    if (params.robustness_test && (params.split_only || params.bias_only)) {
+        error("--robustness_test needs the full pipeline and can't be combined with --split_only or --bias_only.")
+    }
+
     datasets_ch = buildDatasetsChannel()
 
     if (params.bias_only) {
@@ -142,8 +148,8 @@ workflow {
             // --split_only: partition/node_mapping are precomputed and required
             // (validated in buildDatasetsChannel), so CLUSTERING (FETCH_DATA/
             // RUN_BLAST/MAKE_METIS/RUN_KAHIP) never needs to run at all.
-            partition_ch    = datasets_ch.map { meta, ppis, sequences, go_annotations, species, blast_results, candidate_network, partition, node_mapping, train_ppis, val_ppis, test_balanced_ppis, test_realistic_ppis -> tuple(meta, partition) }
-            node_mapping_ch = datasets_ch.map { meta, ppis, sequences, go_annotations, species, blast_results, candidate_network, partition, node_mapping, train_ppis, val_ppis, test_balanced_ppis, test_realistic_ppis -> tuple(meta, node_mapping) }
+            partition_ch    = expandSeeds(datasets_ch.map { meta, ppis, sequences, go_annotations, species, blast_results, candidate_network, partition, node_mapping, train_ppis, val_ppis, test_balanced_ppis, test_realistic_ppis -> tuple(meta, partition) }, ['split'])
+            node_mapping_ch = expandSeeds(datasets_ch.map { meta, ppis, sequences, go_annotations, species, blast_results, candidate_network, partition, node_mapping, train_ppis, val_ppis, test_balanced_ppis, test_realistic_ppis -> tuple(meta, node_mapping) }, ['split'])
         } else {
             clustered = CLUSTERING(
                 data.sequences, data.lengths,
@@ -153,12 +159,16 @@ workflow {
             node_mapping_ch = clustered.node_mapping
         }
 
-        split = SPLIT_POSITIVES(ppis_ch, data.sequences, partition_ch, node_mapping_ch)
+        split = SPLIT_POSITIVES(
+            expandSeeds(ppis_ch, ['split']), expandSeeds(data.sequences, ['split']),
+            partition_ch, node_mapping_ch
+        )
 
+        def to_sampling = ['split', 'sampling']
         neg = SAMPLE_NEGATIVES(
-            split.train_ppis, split.val_ppis, split.test_ppis,
-            data.species, data.go_annotations,
-            datasets_ch.map { meta, ppis, sequences, go_annotations, species, blast_results, candidate_network, partition, node_mapping, train_ppis, val_ppis, test_balanced_ppis, test_realistic_ppis -> tuple(meta, candidate_network) }
+            expandSeeds(split.train_ppis, ['sampling']), expandSeeds(split.val_ppis, ['sampling']), expandSeeds(split.test_ppis, ['sampling']),
+            expandSeeds(data.species, to_sampling), expandSeeds(data.go_annotations, to_sampling),
+            expandSeeds(datasets_ch.map { meta, ppis, sequences, go_annotations, species, blast_results, candidate_network, partition, node_mapping, train_ppis, val_ppis, test_balanced_ppis, test_realistic_ppis -> tuple(meta, candidate_network) }, to_sampling)
         )
 
         // --split_only stops here: SOLVE_ILP (via SPLIT_POSITIVES) + CDHIT2D +
@@ -166,21 +176,40 @@ workflow {
         // published the four split files; TRAIN_BASELINE/QC add nothing this
         // mode asks for.
         if (!params.split_only) {
+            def all_levels  = ['split', 'sampling', 'training']
+            def to_training = ['sampling', 'training']
+            // EMBED_SEQUENCES embeds the union of all these FASTAs once per
+            // embedding model, so expanding them doesn't repeat any embedding.
+            train_fasta = expandSeeds(split.train_fasta, to_training)
+            val_fasta   = expandSeeds(split.val_fasta, to_training)
+            test_fasta  = expandSeeds(split.test_fasta, to_training)
+            neg_train          = expandSeeds(neg.train, ['training'])
+            neg_val            = expandSeeds(neg.val, ['training'])
+            neg_test_balanced  = expandSeeds(neg.test_balanced, ['training'])
+            neg_test_realistic = expandSeeds(neg.test_realistic, ['training'])
+
             baseline = TRAIN_BASELINE(
-                split.train_fasta, split.val_fasta, split.test_fasta,
-                neg.train, neg.val, neg.test_balanced, neg.test_realistic
+                train_fasta, val_fasta, test_fasta,
+                neg_train, neg_val, neg_test_balanced, neg_test_realistic
             )
 
-            bias = BIAS_DIAGNOSTICS(
-                neg.train, neg.val, neg.test_balanced, neg.test_realistic,
-                clustered.blast_out, baseline.embeddings, data.go_annotations, data.species
-            )
+            if (params.robustness_test) {
+                ROBUSTNESS(baseline.mqc)
+            } else {
+                blast_out = expandSeeds(clustered.blast_out, all_levels)
 
-            QC(
-                bias.mqc, clustered.blast_out,
-                split.train_fasta, split.val_fasta, split.test_fasta,
-                split.sorted_mqc, split.nr_mqc, neg.mqc, baseline.mqc
-            )
+                bias = BIAS_DIAGNOSTICS(
+                    neg_train, neg_val, neg_test_balanced, neg_test_realistic,
+                    blast_out, baseline.embeddings,
+                    expandSeeds(data.go_annotations, all_levels), expandSeeds(data.species, all_levels)
+                )
+
+                QC(
+                    bias.mqc, blast_out,
+                    train_fasta, val_fasta, test_fasta,
+                    split.sorted_mqc, split.nr_mqc, neg.mqc, baseline.mqc
+                )
+            }
         }
     }
 }
