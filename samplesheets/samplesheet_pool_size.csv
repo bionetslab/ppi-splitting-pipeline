@@ -1,0 +1,10 @@
+id,ppis,embedding_model,split_method,ilp_kahip_k,ilp_max_sec,neg_ilp_time_limit,negative_sampling_method,neg_ilp_lambda_degree,neg_ilp_lambda_taxon_pair,neg_ilp_lambda_self_loop,neg_ilp_lambda_jaccard,neg_ilp_pool_factor
+Hippie-ILP-pool2,data/HIPPIE-current.csv,data/all_embeddings_esm2.npz,ilp,100,7200,7200,ilp,1,0,1,1,2
+String-ILP-pool2,data/string.csv,data/all_embeddings_esm2.npz,ilp,100,7200,7200,ilp,1,0,1,1,2
+String900-ILP-pool2,data/string_900.csv,data/all_embeddings_esm2.npz,ilp,100,7200,7200,ilp,1,0,1,1,2
+Hippie-ILP-pool4,data/HIPPIE-current.csv,data/all_embeddings_esm2.npz,ilp,100,7200,7200,ilp,1,0,1,1,4
+String-ILP-pool4,data/string.csv,data/all_embeddings_esm2.npz,ilp,100,7200,7200,ilp,1,0,1,1,4
+String900-ILP-pool4,data/string_900.csv,data/all_embeddings_esm2.npz,ilp,100,7200,7200,ilp,1,0,1,1,4
+Hippie-ILP-pool8,data/HIPPIE-current.csv,data/all_embeddings_esm2.npz,ilp,100,7200,7200,ilp,1,0,1,1,8
+String-ILP-pool8,data/string.csv,data/all_embeddings_esm2.npz,ilp,100,7200,7200,ilp,1,0,1,1,8
+String900-ILP-pool8,data/string_900.csv,data/all_embeddings_esm2.npz,ilp,100,7200,7200,ilp,1,0,1,1,8

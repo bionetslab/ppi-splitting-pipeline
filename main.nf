@@ -31,6 +31,7 @@ def buildDatasetsChannel() {
         "negative_sampling_method",
         "neg_ilp_time_limit", "neg_ilp_lambda_degree",
         "neg_ilp_lambda_taxon_pair", "neg_ilp_lambda_self_loop", "neg_ilp_lambda_jaccard",
+        "neg_ilp_pool_factor",
     ]
     def rows = samplesheetToList(params.samplesheet, "${projectDir}/assets/schema_input.json")
 
@@ -85,6 +86,7 @@ def buildDatasetsChannel() {
             neg_ilp_lambda_taxon_pair: isGiven(row.neg_ilp_lambda_taxon_pair) ? row.neg_ilp_lambda_taxon_pair : params.neg_ilp_lambda_taxon_pair,
             neg_ilp_lambda_self_loop : isGiven(row.neg_ilp_lambda_self_loop)  ? row.neg_ilp_lambda_self_loop  : params.neg_ilp_lambda_self_loop,
             neg_ilp_lambda_jaccard   : isGiven(row.neg_ilp_lambda_jaccard)    ? row.neg_ilp_lambda_jaccard    : params.neg_ilp_lambda_jaccard,
+            neg_ilp_pool_factor      : isGiven(row.neg_ilp_pool_factor)       ? row.neg_ilp_pool_factor       : params.neg_ilp_pool_factor,
         ]
         tuple(meta,
             row.ppis              ? file(row.ppis,              checkIfExists: true) : [],

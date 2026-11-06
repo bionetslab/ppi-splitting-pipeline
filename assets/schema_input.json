@@ -175,6 +175,10 @@
       "neg_ilp_lambda_jaccard": {
         "type": "number",
         "minimum": 0
+      },
+      "neg_ilp_pool_factor": {
+        "type": "integer",
+        "minimum": 1
       }
     },
     "required": ["id"]
