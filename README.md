@@ -85,7 +85,7 @@ Bias diagnostics and QC are skipped; the MultiQC report instead shows a per-data
 mean and standard deviation of every classifier metric, split into the contribution of each seed
 source. Outputs land in `results/<id>/robustness/split<S>/sampling<N>/training<T>/`, with the
 summary in `results/<id>/robustness/robustness_runs.tsv` and `robustness_summary_mqc.tsv`.
-`--robustness_test` can't be combined with `--split_only`, `--bias_only` or `--precomputed_split`.
+`--robustness_test` can't be combined with `--split_only` or `--bias_only`.
 
 ```
 nextflow run main.nf --samplesheet samplesheet.csv --outdir results_robustness --robustness_test
@@ -101,6 +101,10 @@ are discarded), `blast_results`, `sequences`, `go_annotations` and `species`; `p
 ```
 nextflow run main.nf --samplesheet samplesheet.csv --outdir results_resampled --precomputed_split
 ```
+
+With `--robustness_test`, give one row per released split, all with the same `id` and that split's `split_seed`
+(e.g. 1234, 1, 2, with `train_ppis` etc. from `results/<id>/robustness/split<S>/sampling42/`). Each row is then
+expanded over the sampling and training seeds only, so the summary again covers all 27 seed combinations.
 
 ### View the report
 

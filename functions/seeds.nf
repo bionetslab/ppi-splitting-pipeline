@@ -15,13 +15,14 @@ def seedsFor(String level) {
 // ("split", "sampling", "training"), adding meta.<level>_seed. Expanding a
 // channel to the same levels always yields the same metas, so channels
 // expanded separately still join on meta. Outside --robustness_test every
-// level has a single seed, so this is a 1:1 map.
+// level has a single seed, so this is a 1:1 map. A level whose seed is already in meta (a samplesheet split_seed
+// under --precomputed_split) is kept as-is.
 def expandSeeds(ch, List levels) {
     ch.flatMap { item ->
         def metas = [item[0]]
         levels.each { level ->
             def key = level + '_seed'
-            metas = metas.collectMany { m -> seedsFor(level).collect { s -> m + [(key): s] } }
+            metas = metas.collectMany { m -> m.containsKey(key) ? [m] : seedsFor(level).collect { s -> m + [(key): s] } }
         }
         metas.collect { m -> [m] + item.drop(1) }
     }

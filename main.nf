@@ -32,7 +32,7 @@ def buildDatasetsChannel() {
         "negative_sampling_method",
         "neg_ilp_time_limit", "neg_ilp_lambda_degree",
         "neg_ilp_lambda_taxon_pair", "neg_ilp_lambda_self_loop", "neg_ilp_lambda_jaccard",
-        "neg_ilp_pool_factor",
+        "neg_ilp_pool_factor", "split_seed",
     ]
     def rows = samplesheetToList(params.samplesheet, "${projectDir}/assets/schema_input.json")
 
@@ -52,6 +52,14 @@ def buildDatasetsChannel() {
                   && row.sequences && row.go_annotations && row.species && row.blast_results)) {
                 error("--precomputed_split requires every samplesheet row to supply train_ppis, val_ppis, test_balanced_ppis, sequences, go_annotations, species, and blast_results (row '${row.id}' is missing at least one).")
             }
+        }
+
+        if (isGiven(row.split_seed) && !params.precomputed_split) {
+            error("split_seed is only used with --precomputed_split (row '${row.id}').")
+        }
+        // Without it, --robustness_test would re-label the same given split as each of the 3 split seeds
+        if (params.precomputed_split && params.robustness_test && !isGiven(row.split_seed)) {
+            error("--precomputed_split --robustness_test needs split_seed on every row: one row per released split (row '${row.id}' is missing it).")
         }
 
         // split_only skips FETCH_DATA/CLUSTERING/TRAIN_BASELINE/QC entirely,
@@ -97,6 +105,7 @@ def buildDatasetsChannel() {
             neg_ilp_lambda_jaccard   : isGiven(row.neg_ilp_lambda_jaccard)    ? row.neg_ilp_lambda_jaccard    : params.neg_ilp_lambda_jaccard,
             neg_ilp_pool_factor      : isGiven(row.neg_ilp_pool_factor)       ? row.neg_ilp_pool_factor       : params.neg_ilp_pool_factor,
         ]
+        if (isGiven(row.split_seed)) meta.split_seed = row.split_seed  // expandSeeds keeps it instead of expanding
         tuple(meta,
             row.ppis              ? file(row.ppis,              checkIfExists: true) : [],
             row.sequences         ? file(row.sequences,         checkIfExists: true) : [],
@@ -115,8 +124,8 @@ def buildDatasetsChannel() {
 }
 
 workflow {
-    if (params.robustness_test && (params.split_only || params.bias_only || params.precomputed_split)) {
-        error("--robustness_test needs the full pipeline and can't be combined with --split_only, --bias_only or --precomputed_split.")
+    if (params.robustness_test && (params.split_only || params.bias_only)) {
+        error("--robustness_test needs the full pipeline and can't be combined with --split_only or --bias_only.")
     }
     if (params.precomputed_split && (params.split_only || params.bias_only)) {
         error("--precomputed_split can't be combined with --split_only or --bias_only.")
