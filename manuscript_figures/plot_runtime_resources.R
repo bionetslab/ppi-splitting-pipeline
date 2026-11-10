@@ -4,7 +4,7 @@ library(stringr)
 library(cowplot)
 library(scales)
 
-repo <- "/path/to/project/ppi-splitting-pipeline/"
+repo <- "/Users/uh61ygag/PythonProjects/ppi-splitting-pipeline/"
 # One figure per embedding; each concatenates several Nextflow reports (missing ones are skipped)
 report_paths <- list(
   esm2 = paste0(repo, "results_robustness/", c("runtime_robustness.html", "runtime_robustness_struc.html",
@@ -47,6 +47,23 @@ all_tasks <- rbindlist(lapply(names(report_paths), function(nm) {
 all_tasks <- all_tasks[!(report == "report-prott5.html" & sub(":.*$", "", process) %in% c("BIAS_DIAGNOSTICS", "QC"))]
 # Failed attempts are retried; only count the attempts that produced results (cached tasks keep their original metrics)
 all_tasks <- all_tasks[status != "FAILED"]
+
+# The ILP negative sampling in the reports above ran with cvxpy 1.9.2, whose Gurobi interface builds the model in
+# O(n^2) Python (hours for the large train splits). Replace it with the default-configuration runs (4x pool, all
+# lambdas as in the robustness runs) from the --precomputed_split pool-size run with cvxpy >= 1.9.3, on the released
+# splits (split seed 1234, sampling seed 42). Sampling doesn't depend on the embedding, so both figures get them.
+fixed_ilp_report <- paste0(repo, "results_pool_size/pool_size.html")
+if (file.exists(fixed_ilp_report)) {
+  fixed_ilp <- parse_nf_report(fixed_ilp_report)[process == "SAMPLE_NEGATIVES:SAMPLE_NEGATIVES_ILP" & status != "FAILED"]
+  fixed_ilp[, report := basename(fixed_ilp_report)]
+  all_tasks <- rbind(
+    all_tasks[process != "SAMPLE_NEGATIVES:SAMPLE_NEGATIVES_ILP"],
+    fixed_ilp[grepl("-ILP-(hcn-)?pool4_", tag)][, run := "esm2"],
+    fixed_ilp[grepl("-ILP-pool4_", tag)][, run := "prott5"]  # the ProtT5 runs had no HCN rows
+  )
+} else {
+  message("Missing ", basename(fixed_ilp_report), ": ILP negative sampling still shows the slow cvxpy 1.9.2 runtimes")
+}
 
 all_tasks[, `:=`(
   module   = sub(":.*$", "", process),
