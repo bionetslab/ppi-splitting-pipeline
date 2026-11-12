@@ -149,3 +149,20 @@ process REMOVE_REDUNDANT {
         --id             ${meta.id}
     """
 }
+
+// --precomputed_split: recovers the positives (and their FASTA) from a given labelled split, in place of
+// SPLIT_POSITIVES, so only negative sampling, training and diagnostics run again.
+process EXTRACT_POSITIVES {
+    tag "${meta.id}: ${label}"
+
+    input:
+    tuple val(meta), val(label), path(labelled_csv, stageAs: 'labelled.csv'), path(fasta)
+
+    output:
+    tuple val(meta), val(label), path("${label}_pos.csv"), path("${label}_pos.fasta")
+
+    script:
+    """
+    extract_positives.py ${labelled_csv} ${fasta} ${label}_pos.csv ${label}_pos.fasta
+    """
+}

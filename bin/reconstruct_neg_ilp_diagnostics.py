@@ -2,7 +2,7 @@
 """Reconstruct the ILP negative sampler's MultiQC diagnostics table for robustness runs, which don't export it.
 
 The bias terms only depend on the positives, the chosen negatives and the candidate pool the ILP picked from. The
-pool isn't saved but is deterministic (sorted protein index, --seed = sampling seed, --max-candidates = 4 * #positives,
+pool isn't saved but is deterministic (sorted protein index, --seed = sampling seed, --max-candidates = neg_ilp_pool_factor (default 4) * #positives,
 see processes/negative_sampling.nf), so it is rebuilt with sample_negatives_ilp.py's own functions and every term is
 evaluated at the saved negatives instead of re-solving.
 
@@ -52,10 +52,10 @@ def read_labelled(path):
     return pos, neg
 
 
-def reconstruct(split, csv_path, lambdas, seed, species_path, go_path, candidate_network=None):
+def reconstruct(split, csv_path, lambdas, seed, species_path, go_path, candidate_network=None, pool_factor=4):
     """Return one diagnostics row, rebuilding the context exactly like sample_negatives_ilp.sample_negatives_ilp()."""
     pos_rows, neg_rows = read_labelled(csv_path)
-    cfg = SamplingConfig(**lambdas, seed=seed, max_candidates=4 * len(pos_rows))
+    cfg = SamplingConfig(**lambdas, seed=seed, max_candidates=pool_factor * len(pos_rows))
     protein_to_idx, idx_to_protein = build_protein_index(pos_rows)
     pos_pairs = pos_pairs_from_rows(pos_rows, protein_to_idx)
 
@@ -151,7 +151,7 @@ def main():
                 for split in SPLITS:
                     print(f"{id_} {split_seed}/{sampling_seed} {split} ...", file=sys.stderr, flush=True)
                     row = reconstruct(split, seed_dir / f"{split}.csv", lambdas_from(ss), sampling_seed, species, go,
-                                      network)
+                                      network, int(ss.get("neg_ilp_pool_factor") or 4))
                     rows.append({"Sample": f"{mqc_sample(id_, split)}_split{split_seed}_sampling{sampling_seed}",
                                  "ID": id_, "split_seed": split_seed, "sampling_seed": sampling_seed, **row})
 
