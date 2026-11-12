@@ -4,12 +4,13 @@ library(stringr)
 library(cowplot)
 library(scales)
 
-report_paths <- c(
-  prott5_run = "/path/to/report-prott5.html"
-)
-
-run_labels <- c(
-  prott5_run = "ProtT5 Run"
+repo <- "/path/to/project/ppi-splitting-pipeline/"
+# One figure per embedding; each concatenates several Nextflow reports (missing ones are skipped)
+report_paths <- list(
+  esm2 = paste0(repo, "results_robustness/", c("runtime_robustness.html", "runtime_robustness_struc.html",
+                                               "runtime_robustness_hcn.html", "runtime_robustness_bias.html",
+                                               "runtime_robustness_hcn_bias.html")),
+  prott5 = paste0(repo, "results_prott5/", c("report-prott5.html", "report-bias.html"))
 )
 
 parse_nf_report <- function(path) {
@@ -38,10 +39,14 @@ parse_nf_report <- function(path) {
 }
 
 all_tasks <- rbindlist(lapply(names(report_paths), function(nm) {
-  dt <- parse_nf_report(path.expand(report_paths[[nm]]))
-  dt[, run := run_labels[[nm]]]
-  dt
+  paths <- path.expand(report_paths[[nm]])
+  if (any(!file.exists(paths))) message("Skipping missing reports: ", paste(basename(paths[!file.exists(paths)]), collapse = ", "))
+  rbindlist(lapply(paths[file.exists(paths)], function(p) parse_nf_report(p)[, report := basename(p)]))[, run := nm]
 }))
+# The ProtT5 bias analysis is rerun separately (report-bias.html), so drop it and its QC from the original run
+all_tasks <- all_tasks[!(report == "report-prott5.html" & sub(":.*$", "", process) %in% c("BIAS_DIAGNOSTICS", "QC"))]
+# Failed attempts are retried; only count the attempts that produced results (cached tasks keep their original metrics)
+all_tasks <- all_tasks[status != "FAILED"]
 
 all_tasks[, `:=`(
   module   = sub(":.*$", "", process),
@@ -58,6 +63,7 @@ module_labels <- c(
   SAMPLE_NEGATIVES = "Negative sampling",
   BIAS_DIAGNOSTICS = "Quality control",
   QC               = "Quality control",
+  ROBUSTNESS       = "Quality control",
   TRAIN_BASELINE   = "Baseline model"
 )
 
@@ -80,6 +86,8 @@ process_labels <- c(
   "QC:COLLECT_BIAS"                          = "Collect bias metrics",
   "QC:SIMILARITY_HEATMAP"                    = "Similarity heatmap",
   "QC:MULTIQC"                               = "MultiQC report",
+  "ROBUSTNESS:ROBUSTNESS_SUMMARY"            = "Robustness summary",
+  "ROBUSTNESS:MULTIQC"                       = "MultiQC report",
   "TRAIN_BASELINE:EMBED_SEQUENCES"           = "Compute embeddings",
   "TRAIN_BASELINE:TRAIN_CLASSIFIER"          = "Train baseline classifier"
 )
@@ -90,7 +98,7 @@ all_tasks[, process_label := process_labels[process]]
 # KaHIP is run with a different number of target clusters depending on the
 # splitting strategy (k=3 for regular/leakage splits, k=100 for ILP-based
 # ones), which strongly affects its runtime, so keep the two apart.
-all_tasks[, kahip_k := str_match(tag, ":\\s*k=(\\d+)$")[, 2]]
+all_tasks[, kahip_k := str_match(tag, ":\\s*k=(\\d+)")[, 2]]  # tag ends in ", seed=<split seed>" in newer runs
 all_tasks[process == "CLUSTERING:RUN_KAHIP",
           process_label := paste0("KaHIP clustering (k=", kahip_k, ")")]
 
@@ -109,55 +117,60 @@ module_colors <- c(
   "Baseline model"       = "#ffb000"
 )
 
-### Plot #########################################################################
+### Plot: one figure per embedding ###############################################
 
-p_time <- ggplot(all_tasks, aes(x = process_label, y = runtime_min, color = module_label)) +
-  geom_boxplot(outlier.shape = NA, width = 0.6) +
-  geom_jitter(width = 0.15, alpha = 0.6, size = 1.3) +
-  #scale_y_log10(labels = label_number()) +
-  scale_color_manual(values = module_colors) +
-  coord_flip() +
-  theme_minimal(base_size = 12) +
-  labs(x = NULL, y = "Wall-clock runtime [min]", color = NULL) +
-  theme(legend.position = "none")
-
-p_mem <- ggplot(all_tasks, aes(x = process_label, y = peak_mem_gb, color = module_label)) +
-  geom_boxplot(outlier.shape = NA, width = 0.6) +
-  geom_jitter(width = 0.15, alpha = 0.6, size = 1.3) +
-  #scale_y_log10(labels = label_number()) +
-  scale_color_manual(values = module_colors) +
-  coord_flip() +
-  theme_minimal(base_size = 12) +
-  labs(x = NULL, y = "Peak memory [GB]", color = NULL) +
-  theme(axis.text.y = element_blank())
-
-legend_source <- p_mem + theme(legend.position = "top")+
-  guides(color = guide_legend(nrow = 1))
-shared_legend <- cowplot::get_legend(legend_source)
-
-plots_row <- plot_grid(p_time, p_mem + theme(legend.position = "none"),
-                        nrow = 1, rel_widths = c(1.35, 1))
-final_plot <- plot_grid(shared_legend, plots_row, ncol = 1, rel_heights = c(0.08, 1))
-final_plot
-
-ggsave("figures/runtime_resources_prott5.pdf", final_plot, width = 8, height = 5, dpi = 300)
+for (r in unique(all_tasks$run)) {
+  tasks <- all_tasks[run == r]
+  
+  p_time <- ggplot(tasks, aes(x = process_label, y = runtime_min, color = module_label)) +
+    geom_boxplot(outlier.shape = NA, width = 0.6) +
+    geom_jitter(width = 0.15, alpha = 0.6, size = 1.3) +
+    #scale_y_log10(labels = label_number()) +
+    scale_color_manual(values = module_colors) +
+    coord_flip() +
+    theme_minimal(base_size = 12) +
+    labs(x = NULL, y = "Wall-clock runtime [min]", color = NULL) +
+    theme(legend.position = "none")
+  
+  p_mem <- ggplot(tasks, aes(x = process_label, y = peak_mem_gb, color = module_label)) +
+    geom_boxplot(outlier.shape = NA, width = 0.6) +
+    geom_jitter(width = 0.15, alpha = 0.6, size = 1.3) +
+    #scale_y_log10(labels = label_number()) +
+    scale_color_manual(values = module_colors) +
+    coord_flip() +
+    theme_minimal(base_size = 12) +
+    labs(x = NULL, y = "Peak memory [GB]", color = NULL) +
+    theme(axis.text.y = element_blank())
+  
+  legend_source <- p_mem + theme(legend.position = "top")+
+    guides(color = guide_legend(nrow = 1))
+  shared_legend <- cowplot::get_legend(legend_source)
+  
+  plots_row <- plot_grid(p_time, p_mem + theme(legend.position = "none"),
+                          nrow = 1, rel_widths = c(1.35, 1))
+  final_plot <- plot_grid(shared_legend, plots_row, ncol = 1, rel_heights = c(0.08, 1))
+  print(final_plot)
+  
+  ggsave(paste0("figures/runtime_resources_", r, ".pdf"), final_plot, width = 8, height = 5, dpi = 300)
+}
 
 ### Summary table for the manuscript text ######################################
 
+# Some cached tasks lack peak memory, hence na.rm for the memory columns
 run_summary <- all_tasks[, .(
   n_tasks             = .N,
   total_task_hours    = sum(realtime) / 1000 / 3600,
   total_cpu_hours     = sum(realtime * cpus, na.rm = TRUE) / 1000 / 3600,
-  max_peak_mem_gb     = max(peak_mem_gb)
+  max_peak_mem_gb     = max(peak_mem_gb, na.rm = TRUE)
 ), by = run]
 print(run_summary)
 
 step_summary <- all_tasks[, .(
   median_min = median(runtime_min),
   max_min    = max(runtime_min),
-  median_gb  = median(peak_mem_gb),
-  max_gb     = max(peak_mem_gb)
-), by = .(module_label, process_label)][order(-median_min)]
+  median_gb  = median(peak_mem_gb, na.rm = TRUE),
+  max_gb     = max(peak_mem_gb, na.rm = TRUE)
+), by = .(run, module_label, process_label)][order(run, -median_min)]
 print(step_summary)
 
 fwrite(step_summary, "runtime_resource_summary.csv")

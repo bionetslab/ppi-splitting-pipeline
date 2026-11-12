@@ -1,6 +1,6 @@
 process SAMPLE_NEGATIVES_DEGREE {
-    publishDir(path: { "${params.outdir}/${meta.id}" }, mode: 'copy', saveAs: { f -> f.endsWith('_mqc.tsv') ? null : f })
-    tag "${meta.id}_${label}"
+    publishDir(path: { params.robustness_test ? "${params.outdir}/${meta.id}/robustness/split${meta.split_seed}/sampling${meta.sampling_seed}" : "${params.outdir}/${meta.id}" }, mode: 'copy', saveAs: { f -> f.endsWith('_mqc.tsv') ? null : f })
+    tag "${meta.id}_${label}: seeds ${meta.split_seed}/${meta.sampling_seed}"
     label 'error_retry'
 
     input:
@@ -22,14 +22,14 @@ process SAMPLE_NEGATIVES_DEGREE {
         --split-name ${label} \\
         --ratio      ${ratio} \\
         ${uniform_flag} \\
-        --seed       ${params.seed} \\
+        --seed       ${meta.sampling_seed} \\
         --id         ${meta.id}
     """
 }
 
 process SAMPLE_NEGATIVES_ILP {
-    publishDir(path: { "${params.outdir}/${meta.id}" }, mode: 'copy', saveAs: { f -> f.endsWith('_mqc.tsv') ? null : f })
-    tag "${meta.id}_${label}"
+    publishDir(path: { params.robustness_test ? "${params.outdir}/${meta.id}/robustness/split${meta.split_seed}/sampling${meta.sampling_seed}" : "${params.outdir}/${meta.id}" }, mode: 'copy', saveAs: { f -> f.endsWith('_mqc.tsv') ? null : f })
+    tag "${meta.id}_${label}: seeds ${meta.split_seed}/${meta.sampling_seed}"
     label 'error_retry'
     label 'gurobi'
 
@@ -67,7 +67,7 @@ process SAMPLE_NEGATIVES_ILP {
         --time-limit         ${meta.neg_ilp_time_limit} \\
         --mip-gap            ${params.neg_ilp_mip_gap} \\
         --threads            ${task.cpus} \\
-        --seed               ${params.seed} \\
+        --seed               ${meta.sampling_seed} \\
         --diagnostics-out    ${label}_mqc.tsv \\
         --residuals-out      ${label}_residuals_mqc.tsv \\
         --max-candidates     \$max_candidates \\

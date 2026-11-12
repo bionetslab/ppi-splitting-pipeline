@@ -3,104 +3,87 @@ library(ggplot2)
 library(cowplot)
 library(dplyr)
 
-### Fig. 5a: Random Forest results ####
-core_path <- "/path/to/ppi-splitting-pipeline/results_esm2/"
+path_to_robustness <- "/path/to/project/ppi-splitting-pipeline/results_robustness/"
+path_to_hcn <- "/path/to/project/ppi-splitting-pipeline/results_robustness_hcn/"
 
-path_to_results <- paste0(core_path, "multiqc_non_struc/")
-path_to_hcn_results <- paste0(core_path, "multiqc_hcn/")
+pop_sd <- function(x) sqrt(mean((x - mean(x))^2))  # population SD, as in bin/robustness_summary.py
 
-test_results_balanced <- fread(paste0(path_to_results, "multiqc_report_data/multiqc_classifier_metrics_test_balanced_table.txt"), sep="\t")
-test_results_balanced_hcn <- fread(paste0(path_to_hcn_results, "multiqc_report_data/multiqc_classifier_metrics_test_balanced_table.txt"), sep="\t")
-test_results_balanced <- rbind(test_results_balanced, test_results_balanced_hcn)
-test_results_balanced$Dataset <- sapply(stringr::str_split(test_results_balanced$Sample, "-", n = 2),`[`, 1)
-test_results_balanced$Category <- sapply(stringr::str_split(test_results_balanced$Sample, "-", n = 2),`[`, 2)
-test_results_balanced[, Category := factor(Category, levels = c("Leakage-split", "regular", "ILP-split", "ILP-split-and-sampling", "ILP-hcn"))]
-
-test_results_real <- fread(paste0(path_to_results, "multiqc_report_data/multiqc_classifier_metrics_test_realistic_table.txt"), sep="\t")
-test_results_real_hcn <- fread(paste0(path_to_hcn_results, "multiqc_report_data/multiqc_classifier_metrics_test_realistic_table.txt"), sep="\t")
-test_results_real <- rbind(test_results_real, test_results_real_hcn)
-test_results_real$Dataset <- sapply(stringr::str_split(test_results_real$Sample, "-", n = 2),`[`, 1)
-test_results_real$Category <- sapply(stringr::str_split(test_results_real$Sample, "-", n = 2),`[`, 2)
-test_results_real[, Category := factor(Category, levels = c("Leakage-split", "regular", "ILP-split", "ILP-split-and-sampling", "ILP-hcn"))]
-
-test_results_balanced$TestSet <- "balanced"
-test_results_real$TestSet <- "realistic"
-
-comparison <- rbind(test_results_balanced, test_results_real)
-rename_map_no_breaks <- c(
-  Hippie     = "HIPPIE",
-  Intact     = "IntAct",
-  String     = "STRING: human, physical",
-  String900  = "STRING-900",
-  StringDB  = "STRING-database",
-  StringExp  = "STRING-experimental",
-  StringText  = "STRING-textmining",
-  PDB_dimers  = "PDB-Dimers",
-  Pinder  = "PINDER"
-)
-comparison <- comparison[!Dataset %in% c("Intact", "PDB_dimers", "Pinder"), ]
-comparison[, Dataset := rename_map_no_breaks[Dataset]]
-comparison[, Dataset := factor(Dataset, levels = rev(c("HIPPIE", 
-                                                       "STRING: human, physical", 
-                                                       "STRING-900",
-                                                       "STRING-database",
-                                                       "STRING-experimental",
-                                                       "STRING-textmining")))]
-
-comparison <- comparison[, -c("Sample", "ID")]
+# IntAct is multi-species, the HCN is human-only; PDB-Dimers/PINDER have no HCN run
+keep_ids <- function(ids) grepl("-(ILP-split-and-sampling|ILP-hcn)$", ids) &
+  !sub("-.*", "", ids) %in% c("Intact", "PDB_dimers", "Pinder")
 
 category_map <- c(
-  "Leakage-split" = "Maximally biased",
-  "regular" = "Similarity-reduced",
-  "ILP-split" = "ILP-based split",
   "ILP-split-and-sampling" = "ILP-based split and sampling",
   "ILP-hcn" = "ILP-based split and sampling from HCN"
 )
 
-comparison[Category %in% names(category_map), Category := category_map[Category]]
-comparison[, Category := factor(Category, levels = rev(c(
-  "Maximally biased", "Similarity-reduced", "ILP-based split", "ILP-based split and sampling",  "ILP-based split and sampling from HCN"
-)))]
+### Fig. 5a: Random Forest results ####
+rename_map_no_breaks <- c(
+  Hippie     = "HIPPIE",
+  String     = "STRING: human, physical",
+  String900  = "STRING-900",
+  StringDB  = "STRING-database",
+  StringExp  = "STRING-experimental",
+  StringText  = "STRING-textmining"
+)
 
-comparison <- comparison[Category %in% c("ILP-based split and sampling",  "ILP-based split and sampling from HCN")]
+# Seed robustness runs (split x sampling x training seeds)
+robustness_runs <- rbindlist(lapply(Sys.glob(paste0(c(path_to_robustness, path_to_hcn), "*/robustness/robustness_runs.tsv")),
+                                    fread, sep = "\t"))
+robustness_runs <- robustness_runs[keep_ids(ID)]
+robustness_runs[, `:=`(
+  Dataset  = factor(rename_map_no_breaks[sub("-.*", "", ID)], levels = rev(unname(rename_map_no_breaks))),
+  Category = factor(category_map[sub("^[^-]*-", "", ID)], levels = rev(unname(category_map))),
+  TestSet  = sub("test_", "", test_set)
+)]
+
+# Bars show the mean over seed runs
+comparison <- robustness_runs[, .(
+  AUPRC      = mean(AUPRC),
+  AUPRC_sd   = pop_sd(AUPRC),
+  AUPRC_max  = max(AUPRC)
+), by = .(Dataset, Category, TestSet)]
+comparison[, label_x := pmax(AUPRC + AUPRC_sd, AUPRC_max)]  # labels beyond error bars
 
 dodge_width <- position_dodge(width = 0.9)
+hcn_fill <- scale_fill_manual(values = c(
+  "ILP-based split and sampling" = "#785ef0",
+  "ILP-based split and sampling from HCN" = "#648fff"
+))
+error_bars <- geom_errorbar(aes(xmin = AUPRC - AUPRC_sd, xmax = AUPRC + AUPRC_sd),
+                            position = dodge_width, width = 0.5, linewidth = 0.4, show.legend = FALSE)
 
-p_balanced <- ggplot(comparison %>% filter(TestSet == "balanced"), 
+p_balanced <- ggplot(comparison %>% filter(TestSet == "balanced"),
                      aes(y = Dataset, x = AUPRC, fill = Category)) +
   geom_col(position = dodge_width) +
-  geom_text(aes(label = sprintf("%.2f", AUPRC)),
+  error_bars +
+  geom_text(aes(x = label_x, label = sprintf("%.2f ± %.2f", AUPRC, AUPRC_sd)),
             position = dodge_width,
-            hjust = 1,       
+            hjust = 1.05,
             size = 3.2) +
   geom_vline(xintercept = 0.5, linetype = 2) +
-  scale_fill_manual(values = c(
-    "ILP-based split and sampling" = "#785ef0",
-    "ILP-based split and sampling from HCN" = "#648fff"
-  )) +
-  scale_x_reverse() +                                    
+  hcn_fill +
+  scale_x_reverse() +
   coord_cartesian(xlim = c(1.0, 0.48), expand = FALSE)+
   theme_minimal() +
   theme(legend.position = "none",
-        axis.text.y  = element_blank(),   
-        axis.ticks.y = element_blank(),   
+        axis.text.y  = element_blank(),
+        axis.ticks.y = element_blank(),
         axis.title.y = element_blank(),
         plot.margin = margin(5.5, 2, 5.5, 5.5)
         )+
   ggtitle("Balanced")
 
-p_realistic <- ggplot(comparison %>% filter(TestSet == "realistic"), 
+p_realistic <- ggplot(comparison %>% filter(TestSet == "realistic"),
                       aes(y = Dataset, x = AUPRC, fill = Category)) +
   geom_col(position = dodge_width) +
-  geom_text(aes(label = sprintf("%.2f", AUPRC)),
+  error_bars +
+  geom_text(aes(x = label_x, label = sprintf("%.2f ± %.2f", AUPRC, AUPRC_sd)),
             position = dodge_width,
             hjust = -0.1,
             size = 3.2) +
-  geom_vline(xintercept = 0.1, linetype = 2) +
-  scale_fill_manual(values = c(
-    "ILP-based split and sampling" = "#785ef0",
-    "ILP-based split and sampling from HCN" = "#648fff"
-  )) +
+  geom_vline(xintercept = 1/11, linetype = 2) +
+  hcn_fill +
   coord_cartesian(xlim = c(0.0, 1.0), expand = FALSE) +
   theme_minimal() +
   theme(legend.position = "none",
@@ -125,60 +108,54 @@ ggsave("figures/fig5a_hcn_rf.pdf", width=8, height=3, dpi=300)
 
 ### Fig 5b: Bias objective terms results ###
 
-residuals <- fread(paste0(path_to_results, "multiqc_report_data/multiqc_neg_ilp_diagnostics_table.txt"), sep="\t")
-residuals <- residuals[, c("ID", "split", "obj_value", "bias_deg_term", "bias_tax_term", "bias_self_term", "bias_jac_term", "status")]
-res_hcn <- fread(paste0(path_to_hcn_results, "multiqc_report_data/multiqc_neg_ilp_diagnostics_table.txt"), sep="\t")
-res_hcn <- res_hcn[, c("ID", "split", "obj_value", "bias_deg_term", "bias_tax_term", "bias_self_term", "bias_jac_term", "status")]
-residuals <- rbind(residuals, res_hcn)
-residuals$Dataset <- sapply(stringr::str_split(residuals$ID, "-", n = 2),`[`, 1)
-residuals$Category <- sapply(stringr::str_split(residuals$ID, "-", n = 2),`[`, 2)
-rename_map_cat <- c(
-  "ILP-split-and-sampling" = "ILP",
-  "ILP-hcn" = "ILP + HCN"
+rename_map <- c(
+  Hippie     = "HIPPIE",
+  String     = "STRING\nhuman, physical",
+  String900  = "STRING-\n900",
+  StringDB  = "STRING-\ndatabase",
+  StringExp  = "STRING-\nexperimental",
+  StringText  = "STRING-\ntextmining"
 )
-residuals[, Category := rename_map_cat[Category]]
-residuals[, Category := factor(Category, levels = c("ILP", "ILP + HCN"))]
-residuals <- residuals[Dataset != "Intact"]
+rename_split_map <- c(
+  train = "Train",
+  val = "Val.",
+  test_balanced = "Test (bal.)"
+)
 
-res_long <- melt(residuals, id.vars = c("Dataset", "Category", "ID", "split", "obj_value", "status"))
-res_long[split %in% names(rename_split_map), split := rename_split_map[split]]
-res_long[, split := factor(split, levels = c("Train", "Validation", "Test (balanced)", "Test (realistic)"))]
-res_long[Dataset %in% names(rename_map), Dataset := rename_map[Dataset]]
-res_long[, Dataset := factor(Dataset, levels = c("PDB-Dimers", 
-                                                 "PINDER", 
-                                                 "IntAct", 
-                                                 "HIPPIE", 
-                                                 "STRING\nhuman, physical", 
-                                                 "STRING-\n900",
-                                                 "STRING-\ndatabase",
-                                                 "STRING-\nexperimental",
-                                                 "STRING-\ntextmining"))]
-res_long <- res_long[variable != "bias_tax_term"]
+# Robustness runs, all 3x3 (split, sampling) seed combinations; these tables come from bin/reconstruct_neg_ilp_diagnostics.py
+ilp_runs <- rbindlist(lapply(c(path_to_robustness, path_to_hcn), function(d)
+  fread(paste0(d, "multiqc/multiqc_report_data/multiqc_neg_ilp_diagnostics_table.txt"), sep="\t")))
+ilp_runs <- ilp_runs[keep_ids(ID)]
+# Bars show the mean of each term over seed combinations, error bars its SD
+# Taxonomy is left out: all remaining datasets are human-only
+res_long <- melt(ilp_runs, id.vars = c("ID", "split"),
+                 measure.vars = c("bias_deg_term", "bias_self_term", "bias_jac_term"))
+res_long <- res_long[, .(value = mean(value), sd = pop_sd(value)), by = .(ID, split, variable)]
+res_long[, `:=`(Dataset  = factor(rename_map[sub("-.*", "", ID)], levels = unname(rename_map)),
+                Category = factor(c("ILP-split-and-sampling" = "ILP", "ILP-hcn" = "ILP + HCN")[sub("^[^-]*-", "", ID)],
+                                  levels = c("ILP", "ILP + HCN")),
+                split    = factor(rename_split_map[split], levels = unname(rename_split_map)))]
 rename_map_bias <- c(
   bias_deg_term = "Degree",
-  bias_tax_term = "Taxonomy",
   bias_self_term = "Self interactions",
   bias_jac_term = "GO-BP Jaccard index"
 )
-res_long[, variable := rename_map_bias[variable]]
-res_long[, variable := factor(variable, levels = c(
-  "Degree",
-  "Self interactions",
-  "GO-BP Jaccard index"
-))]
+res_long[, variable := factor(rename_map_bias[variable], levels = unname(rename_map_bias))]
 
 ggplot(res_long, aes(x = Category, y = value, fill = variable))+
-  geom_col()+
+  geom_col(position = position_dodge(width = 0.9))+
+  geom_errorbar(aes(ymin = value - sd, ymax = value + sd), position = position_dodge(width = 0.9),
+                width = 0.3, linewidth = 0.4)+
   facet_grid(split~Dataset)+
   scale_fill_manual(values = c(
     "Degree"              = "#ffb000",
     "Self interactions"             = "#fe6100",
-    #"Taxonomy"                 = "#dc267f",
     "GO-BP Jaccard index" = "#785ef0"
   )) +
   theme_minimal(base_size = 12)+
   labs(fill = NULL, y = "Objective value", x = NULL)+
   theme(legend.position = "bottom",
+        panel.grid.minor = element_blank(),
         strip.text.x  = element_text(face = "bold", size = 12, margin = margin(b = 4)),
         )
 ggsave("figures/fig5b_objective_values.pdf", width=8, height=5, dpi=300)

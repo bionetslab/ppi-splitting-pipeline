@@ -1,5 +1,5 @@
 process SORT_PPIS {
-    tag "${meta.id}"
+    tag "${meta.id}: split seed ${meta.split_seed}"
 
     input:
     tuple val(meta), path(ppis), path(fasta), path(partition), path(node_mapping)
@@ -28,7 +28,7 @@ process SORT_PPIS {
 // see bin/bias_analysis.py's "topology_shortcut" attribute. No CD-HIT runs
 // downstream, since it would just strip the shared proteins back out.
 process SPLIT_RANDOM {
-    tag "${meta.id}"
+    tag "${meta.id}: split seed ${meta.split_seed}"
 
     input:
     tuple val(meta), path(ppis), path(fasta)
@@ -50,13 +50,13 @@ process SPLIT_RANDOM {
         --train-split ${meta.train_split} \\
         --val-split   ${meta.val_split} \\
         --test-split  ${meta.test_split} \\
-        --seed        ${params.seed} \\
+        --seed        ${meta.split_seed} \\
         --id          ${meta.id}
     """
 }
 
 process CDHIT2D {
-    tag "${meta.id}_${label}"
+    tag "${meta.id}_${label}: split seed ${meta.split_seed}"
 
     input:
     tuple val(meta), val(label), path(db1_fasta), path(db2_fasta)  // label: "train_val" | "train_test"
@@ -78,7 +78,7 @@ process CDHIT2D {
 }
 
 process SOLVE_ILP {
-    tag "${meta.id}"
+    tag "${meta.id}: split seed ${meta.split_seed}"
     label 'error_retry'
     label 'gurobi'
 
@@ -109,12 +109,13 @@ process SOLVE_ILP {
         --test-split  ${meta.test_split} \\
         --epsilon     ${meta.ilp_epsilon} \\
         --max-sec     ${meta.ilp_max_sec} \\
+        --seed        ${meta.split_seed} \\
         ${params.ilp_solver ? "--solver ${params.ilp_solver}" : ""}
     """
 }
 
 process REMOVE_REDUNDANT {
-    tag "${meta.id}"
+    tag "${meta.id}: split seed ${meta.split_seed}"
 
     input:
     tuple val(meta),

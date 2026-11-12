@@ -3,9 +3,7 @@ library(ggplot2)
 library(dplyr)
 library(tidyr)
 
-core_path <- "/path/to/ppi-splitting-pipeline/results_esm2/"
-
-### Fig 4a: Bias analysis results ####
+#### Fig 4a: Bias analysis results #####
 
 rename_map <- c(
   Hippie     = "HIPPIE",
@@ -18,6 +16,8 @@ rename_map <- c(
   PDB_dimers  = "PDB-Dimers",
   Pinder  = "PINDER"
 )
+
+core_path <- "/path/to/project/ppi-splitting-pipeline/results_robustness_bias/"
 
 all_biases <- lapply(list.files(core_path, pattern="*mqc.tsv", full.names=TRUE, recursive=TRUE), fread)
 names(all_biases) <- list.files(core_path, pattern="*mqc.tsv", full.names=TRUE, recursive=TRUE)
@@ -112,23 +112,18 @@ ggplot(all_biases[Category %in% c("ILP-based split and sampling", "ILP-based spl
 
 ggsave("figures/fig4a_bias_analysis_comparison.pdf", width = 15, height = 8, dpi = 300)
 
-### Fig 4b: Bias objective terms results ###
+#### Fig 4b: Bias objective terms results ####
 
-path_to_results <- paste0(core_path, "multiqc_non_struc/")
-path_to_struc_results <- paste0(core_path, "multiqc_structural/")
-path_to_pdb_results <- paste0(core_path, "multiqc_PDB/")
-
-residuals <- fread(paste0(path_to_results, "multiqc_report_data/multiqc_neg_ilp_diagnostics_table.txt"), sep="\t")
-residuals <- residuals[, c("ID", "split", "obj_value", "bias_deg_term", "bias_tax_term", "bias_self_term", "bias_jac_term", "status")]
-res_struc <- fread(paste0(path_to_struc_results, "multiqc_report_data/multiqc_neg_ilp_diagnostics_table.txt"), sep="\t")
-res_struc <- res_struc[!startsWith(Sample, "PDB")]
-res_struc <- res_struc[, c("ID", "split", "obj_value", "bias_deg_term", "bias_tax_term", "bias_self_term", "bias_jac_term", "status")]
-res_pdb <- fread(paste0(path_to_pdb_results, "multiqc_report_data/multiqc_neg_ilp_diagnostics_table.txt"), sep="\t")
-res_pdb <- res_pdb[, c("ID", "split", "obj_value", "bias_deg_term", "bias_tax_term", "bias_self_term", "bias_jac_term", "status")]
-residuals <- rbind(residuals, res_struc, res_pdb)
-residuals$Dataset <- sapply(stringr::str_split(residuals$ID, "-", n = 2),`[`, 1)
-
-res_long <- melt(residuals, id.vars = c("Dataset", "ID", "split", "obj_value", "status"))
+# Robustness runs, all 3x3 (split, sampling) seed combinations; these tables come from bin/reconstruct_neg_ilp_diagnostics.py
+path_to_robustness <- "/path/to/project/ppi-splitting-pipeline/results_robustness/"
+pop_sd <- function(x) sqrt(mean((x - mean(x))^2))  # population SD, as in bin/robustness_summary.py
+ilp_runs <- rbindlist(lapply(c("multiqc", "multiqc_struc"), function(d)
+  fread(paste0(path_to_robustness, d, "/multiqc_report_data/multiqc_neg_ilp_diagnostics_table.txt"), sep="\t")))
+# Bars show the mean of each term over seed combinations, error bars its SD
+res_long <- melt(ilp_runs, id.vars = c("ID", "split"),
+                 measure.vars = c("bias_deg_term", "bias_tax_term", "bias_self_term", "bias_jac_term"))
+res_long <- res_long[, .(value = mean(value), sd = pop_sd(value)), by = .(ID, split, variable)]
+res_long[, Dataset := sub("-.*", "", ID)]
 res_long[split %in% names(rename_split_map), split := rename_split_map[split]]
 res_long[Dataset %in% names(rename_map), Dataset := rename_map[Dataset]]
 res_long[, Dataset := factor(Dataset, levels = c("PDB-Dimers", 
@@ -159,7 +154,9 @@ res_long[split == "Validation", split := "Val."]
 res_long[, split := factor(split, levels = c("Train", "Val.", "Test (bal.)", "Test (realistic)"))]
 
 ggplot(res_long, aes(x = split, y = value, fill = variable))+
-  geom_col()+
+  geom_col(position = position_dodge(width = 0.9))+
+  geom_errorbar(aes(ymin = value - sd, ymax = value + sd), position = position_dodge(width = 0.9),
+                width = 0.3, linewidth = 0.4)+
   facet_wrap(~Dataset, nrow=2)+
   scale_fill_manual(values = c(
     "Degree"              = "#ffb000",
