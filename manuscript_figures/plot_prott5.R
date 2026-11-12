@@ -2,9 +2,13 @@ library(data.table)
 library(ggplot2)
 library(dplyr)
 
-core_path <- "/path/to/project/ppi-splitting-pipeline/results_prott5/"
-core_path_others <- "/path/to/project/ppi-splitting-pipeline/results_robustness_bias/"  # ESM-2 bias-only run on the 1234/42 robustness splits
-path_to_prott5_results <- paste0(core_path, "multiqc/")
+# Figs B1/B2: ProtT5 bias-only run on the same Leakage-split robustness splits as the ESM-2 one (1234/42), with ProtT5
+# embeddings restricted to proteins that have an ESM-2 embedding (samplesheet_prott5_same_splits_bias_only.csv)
+core_path <- "/path/to/ppi-splitting-pipeline/results_prott5_same_splits_bias/"
+core_path_others <- "/path/to/ppi-splitting-pipeline/results_robustness_bias/"  # ESM-2 bias-only run on the 1234/42 robustness splits
+# Fig B3: ProtT5 RF retrained on the ESM-2 robustness splits (split 1234, sampling 42, training 42) on the same machine,
+# so ESM-2 and ProtT5 differ only in the embeddings (bin/retrain_on_esm2_splits.py)
+path_to_prott5_results <- "/path/to/ppi-splitting-pipeline/results_prott5_same_splits/"
 
 
 ##### Bias analysis ######
@@ -118,16 +122,17 @@ ggplot(comparison, aes(x = Bias, y = `Detectability ESM2 - Detectability ProtT5`
     "Test (realistic)" = "#785ef0"
   )) +
   theme_minimal()+
-  theme(axis.text.x = element_text(angle = 90))
+  theme(axis.text.x = element_text(angle = 90, hjust=1, vjust=0.5))
 ggsave("figures/FigureB2.pdf", width=8, height=5)
 
 ### Random Forest comparison ####
-test_results_balanced_prott5 <- fread(paste0(path_to_prott5_results, "multiqc_report_data/multiqc_classifier_metrics_test_balanced_table.txt"), sep="\t")
+test_results_balanced_prott5 <- fread(paste0(path_to_prott5_results, "multiqc_classifier_metrics_test_balanced_table.txt"), sep="\t")
 test_results_balanced_prott5$embedding <- "ProtT5"
 
 # ESM-2: robustness runs with split seed 1234, sampling seed 42, training seed 42 (the pipeline defaults)
-path_to_robustness <- "/path/to/project/ppi-splitting-pipeline/results_robustness/"
-esm2_runs <- rbindlist(lapply(Sys.glob(paste0(path_to_robustness, "*/robustness/robustness_runs.tsv")), fread, sep = "\t"))
+path_to_robustness <- "/path/to/ppi-splitting-pipeline/results_robustness/"
+path_to_hcn <- "/path/to/ppi-splitting-pipeline/results_robustness_hcn/"
+esm2_runs <- rbindlist(lapply(Sys.glob(paste0(c(path_to_robustness, path_to_hcn), "*/robustness/robustness_runs.tsv")), fread, sep = "\t"))
 esm2_runs <- esm2_runs[split_seed == 1234 & sampling_seed == 42 & training_seed == 42]
 esm2_runs[, `:=`(Sample = ID, embedding = "ESM-2")]
 
@@ -137,7 +142,7 @@ test_results_balanced$Dataset <- sapply(stringr::str_split(test_results_balanced
 test_results_balanced$Category <- sapply(stringr::str_split(test_results_balanced$Sample, "-", n = 2),`[`, 2)
 test_results_balanced[, Category := factor(Category, levels = c("Leakage-split", "regular", "ILP-split", "ILP-split-and-sampling", "ILP-hcn"))]
 
-test_results_real_prott5 <- fread(paste0(path_to_prott5_results, "multiqc_report_data/multiqc_classifier_metrics_test_realistic_table.txt"), sep="\t")
+test_results_real_prott5 <- fread(paste0(path_to_prott5_results, "multiqc_classifier_metrics_test_realistic_table.txt"), sep="\t")
 test_results_real_prott5$embedding <- "ProtT5"
 
 test_results_real <- rbind(esm2_runs[test_set == "test_realistic", names(test_results_real_prott5), with = FALSE],
@@ -181,13 +186,46 @@ category_map <- c(
   "regular" = "Similarity-reduced",
   "ILP-split" = "ILP split",
   "ILP-split-and-sampling" = "ILP split + ILP sampling",
-  "ILP-hcn" = "ILP split + ILP sampling (HCN)"
+  "ILP-hcn" = "ILP split + ILP sampling (HRNI)"
 )
 
 comparison[Category %in% names(category_map), Category := category_map[Category]]
 comparison[, Category := factor(Category, levels = rev(c(
-  "Maximally biased", "Similarity-reduced", "ILP split", "ILP split + ILP sampling", "ILP split + ILP sampling (HCN)"
+  "Maximally biased", "Similarity-reduced", "ILP split", "ILP split + ILP sampling", "ILP split + ILP sampling (HRNI)"
 )))]
+
+# Table B1: ProtT5 metrics, laid out like rf_table.tex (plot_comparison.R); one seed combination, so no SD
+library(kableExtra)
+library(stringr)
+metrics <- c("AUROC", "AUPRC", "F1", "MCC", "Precision", "Recall", "Accuracy")
+prott5_dt <- comparison[embedding == "ProtT5", c("Dataset", "Category", "TestSet", metrics), with = FALSE][
+  order(-Dataset, -Category, TestSet)][, (metrics) := lapply(.SD, function(x) sprintf("%.2f", x)), .SDcols = metrics]
+prott5_dt[, Category := as.character(Category)]
+prott5_dt[Category == "Maximally biased", Category := "Maximally\nbiased"]
+prott5_dt[Category == "Similarity-reduced", Category := "Similarity-\nreduced"]
+prott5_dt[Category == "ILP split + ILP sampling (HRNI)", Category := "ILP split + sampling (HRNI)"]  # shorter, fits the column
+
+# Dataset becomes a group-header row (\multicolumn{9}{l}{Dataset: \textbf{...}}) instead of a column
+dataset_runs <- rle(as.character(prott5_dt$Dataset))
+dataset_index <- setNames(dataset_runs$lengths, paste0("Dataset: \\textbf{", dataset_runs$values, "}"))
+
+prott5_dt %>%
+  mutate(Category = linebreak(str_replace_all(Category, " \\+ ", " +\n"), align = "tl")) %>%  # "tl" = top + left
+  select(Category, TestSet, all_of(metrics)) %>%
+  kbl(format = "latex", booktabs = TRUE, longtable = TRUE,
+      linesep = "", escape = FALSE,
+      col.names = c("Category", "Test set", metrics),
+      caption = "Performance metrics of the baseline with ProtT5 embeddings across datasets, splitting strategies, and test sets.") %>%
+  kable_styling(latex_options = c("repeat_header")) %>%
+  collapse_rows(columns = 1, latex_hline = "none", valign = "top") %>%  # must run before pack_rows, else it mangles \textbf
+  column_spec(1, width = "1.8cm") %>%  # after collapse_rows: the other order drops a } from \makecell cells
+  pack_rows(index = dataset_index, escape = FALSE, bold = FALSE, indent = FALSE, latex_gap_space = "0em") %>%
+  # \midrule above and below each Dataset row; pack_rows only offers \hline, which clashes with booktabs
+  gsub("\\\\addlinespace\\[0em\\]\n", "\\\\midrule\n", .) %>%
+  gsub("(\\\\multicolumn\\{[0-9]+\\}\\{l\\}\\{Dataset:[^\n]*\n)", "\\1\\\\midrule\n", .) %>%
+  sub("\\\\endlastfoot\n\\\\midrule\n", "\\\\endlastfoot\n", .) %>%  # first group already sits under the header rule
+  paste0("{\\small\\setlength{\\tabcolsep}{3pt}\n", ., "}") %>%  # braces keep font/spacing local to this table
+  writeLines("figures/rf_table_prott5.tex")
 
 comparison <- comparison[, c("AUPRC", "embedding", "Dataset", "Category", "TestSet")]
 comparison <- dcast(comparison, ... ~ embedding, value.var = "AUPRC")
@@ -207,7 +245,7 @@ p_balanced <- ggplot(comparison %>% filter(TestSet == "balanced"),
     "Similarity-reduced" = "#fe6100",
     "ILP split" = "#dc267f",
     "ILP split + ILP sampling" = "#785ef0", 
-    "ILP split + ILP sampling (HCN)" = "#648fff"
+    "ILP split + ILP sampling (HRNI)" = "#648fff"
   )) +                                 
   coord_cartesian(xlim = c(-0.4, 0.4), expand = FALSE) +
   theme_minimal() +
@@ -231,7 +269,7 @@ p_realistic <- ggplot(comparison %>% filter(TestSet == "realistic"),
     "Similarity-reduced" = "#fe6100",
     "ILP split" = "#dc267f",
     "ILP split + ILP sampling" = "#785ef0",
-    "ILP split + ILP sampling (HCN)" = "#648fff"
+    "ILP split + ILP sampling (HRNI)" = "#648fff"
   )) +
   coord_cartesian(xlim = c(-0.4, 0.4), expand = FALSE) +
   theme_minimal() +
@@ -254,5 +292,58 @@ plots_row <- plot_grid(p_balanced, p_realistic, nrow = 1,
 # Stack the row of plots on top of the shared legend
 final_plot <- plot_grid(plots_row, shared_legend, ncol = 1, rel_heights = c(1, 0.1))
 final_plot
-ggsave("figures/FigureB3.pdf", height=6, width=8)
+ggsave("figures/FigureB3.pdf", height=7, width=9)
 
+
+### Fig 5a (plot_hcn.R) with ProtT5: ILP split + sampling vs. HRNI ####
+# Same retrained runs as Fig B3; one seed combination, so no error bars
+hrni_dataset_map <- rename_map[c("Hippie", "String", "String900", "StringDB", "StringExp", "StringText")]
+hrni_category_map <- c(
+  "ILP-split-and-sampling" = "ILP-based split and sampling",
+  "ILP-hcn" = "ILP-based split and sampling from HRNI"
+)
+hrni <- rbindlist(list(balanced = test_results_balanced_prott5, realistic = test_results_real_prott5), idcol = "TestSet")
+# IntAct is multi-species, the HRNI network is human-only; PDB-Dimers/PINDER have no HRNI run
+hrni <- hrni[grepl("-(ILP-split-and-sampling|ILP-hcn)$", ID) & sub("-.*", "", ID) %in% names(hrni_dataset_map)]
+hrni[, `:=`(
+  Dataset  = factor(hrni_dataset_map[sub("-.*", "", ID)], levels = rev(unname(hrni_dataset_map))),
+  Category = factor(hrni_category_map[sub("^[^-]*-", "", ID)], levels = rev(unname(hrni_category_map)))
+)]
+
+hrni_fill <- scale_fill_manual(values = c(
+  "ILP-based split and sampling" = "#785ef0",
+  "ILP-based split and sampling from HRNI" = "#648fff"
+))
+
+p5_balanced <- ggplot(hrni[TestSet == "balanced"], aes(y = Dataset, x = AUPRC, fill = Category)) +
+  geom_col(position = dodge_width) +
+  geom_text(aes(label = sprintf("%.2f", AUPRC)), position = dodge_width, hjust = 1.05, size = 3.2) +
+  geom_vline(xintercept = 0.5, linetype = 2) +
+  hrni_fill +
+  scale_x_reverse() +
+  coord_cartesian(xlim = c(1.0, 0.48), expand = FALSE) +
+  theme_minimal() +
+  theme(legend.position = "none",
+        axis.text.y  = element_blank(),
+        axis.ticks.y = element_blank(),
+        axis.title.y = element_blank(),
+        plot.margin = margin(5.5, 2, 5.5, 5.5)) +
+  ggtitle("Balanced")
+
+p5_realistic <- ggplot(hrni[TestSet == "realistic"], aes(y = Dataset, x = AUPRC, fill = Category)) +
+  geom_col(position = dodge_width) +
+  geom_text(aes(label = sprintf("%.2f", AUPRC)), position = dodge_width, hjust = -0.1, size = 3.2) +
+  geom_vline(xintercept = 1/11, linetype = 2) +
+  hrni_fill +
+  coord_cartesian(xlim = c(0.0, 1.0), expand = FALSE) +
+  theme_minimal() +
+  theme(legend.position = "none",
+        axis.title.y = element_blank(),
+        plot.margin = margin(5.5, 5.5, 5.5, 2)) +
+  ggtitle("Realistic")
+
+p5_legend <- cowplot::get_legend(p5_realistic + labs(fill = NULL) + theme(legend.position = "bottom"))
+p5_row <- plot_grid(p5_balanced, p5_realistic, nrow = 1, align = "h", axis = "tb", rel_widths = c(1, 1))
+final_plot <- plot_grid(p5_row, p5_legend, ncol = 1, rel_heights = c(1, 0.1))
+final_plot
+ggsave("figures/fig5a_hcn_rf_prott5.pdf", final_plot, width = 8, height = 3, dpi = 300)

@@ -17,7 +17,7 @@ rename_map <- c(
   Pinder  = "PINDER"
 )
 
-core_path <- "/path/to/project/ppi-splitting-pipeline/results_robustness_bias/"
+core_path <- "/path/to/ppi-splitting-pipeline/results_robustness_bias/"
 
 all_biases <- lapply(list.files(core_path, pattern="*mqc.tsv", full.names=TRUE, recursive=TRUE), fread)
 names(all_biases) <- list.files(core_path, pattern="*mqc.tsv", full.names=TRUE, recursive=TRUE)
@@ -115,10 +115,9 @@ ggsave("figures/fig4a_bias_analysis_comparison.pdf", width = 15, height = 8, dpi
 #### Fig 4b: Bias objective terms results ####
 
 # Robustness runs, all 3x3 (split, sampling) seed combinations; these tables come from bin/reconstruct_neg_ilp_diagnostics.py
-path_to_robustness <- "/path/to/project/ppi-splitting-pipeline/results_robustness/"
+path_to_robustness <- "/path/to/ppi-splitting-pipeline/results_robustness/"
 pop_sd <- function(x) sqrt(mean((x - mean(x))^2))  # population SD, as in bin/robustness_summary.py
-ilp_runs <- rbindlist(lapply(c("multiqc", "multiqc_struc"), function(d)
-  fread(paste0(path_to_robustness, d, "/multiqc_report_data/multiqc_neg_ilp_diagnostics_table.txt"), sep="\t")))
+ilp_runs <- fread(paste0(path_to_robustness, "multiqc/multiqc_report_data/multiqc_neg_ilp_diagnostics_table.txt"), sep="\t")
 # Bars show the mean of each term over seed combinations, error bars its SD
 res_long <- melt(ilp_runs, id.vars = c("ID", "split"),
                  measure.vars = c("bias_deg_term", "bias_tax_term", "bias_self_term", "bias_jac_term"))

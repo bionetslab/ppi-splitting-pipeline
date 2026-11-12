@@ -11,8 +11,8 @@ library(Matrix)
 library(ggforce)
 library(ggtext)
 
-path_to_robustness <- "/path/to/project/ppi-splitting-pipeline/results_robustness/"
-path_to_hcn <- "/path/to/project/ppi-splitting-pipeline/results_robustness_hcn/"
+path_to_robustness <- "/path/to/ppi-splitting-pipeline/results_robustness/"
+path_to_hcn <- "/path/to/ppi-splitting-pipeline/results_robustness_hcn/"
 
 rename_map <- c(
   Hippie     = "HIPPIE",
@@ -45,7 +45,7 @@ category_map <- c(
   "regular" = "Similarity-reduced",
   "ILP-split" = "ILP split",
   "ILP-split-and-sampling" = "ILP split + ILP sampling",
-  "ILP-hcn" = "ILP split + ILP sampling (HCN)"
+  "ILP-hcn" = "ILP split + ILP sampling (HRNI)"
 )
 
 pop_sd <- function(x) sqrt(mean((x - mean(x))^2))  # population SD, as in bin/robustness_summary.py
@@ -235,7 +235,7 @@ metrics <- c("AUROC", "AUPRC", "F1", "MCC", "Precision", "Recall", "Accuracy")
 # Seed robustness runs (split x sampling x training seeds); datasets appear once their runs are in path_to_robustness
 robustness_runs <- rbindlist(lapply(Sys.glob(paste0(c(path_to_robustness, path_to_hcn), "*/robustness/robustness_runs.tsv")),
                                     fread, sep = "\t"))
-robustness_runs <- robustness_runs[ID != "Intact-ILP-hcn"]  # IntAct is multi-species, the HCN is human-only
+robustness_runs <- robustness_runs[ID != "Intact-ILP-hcn"]  # IntAct is multi-species, the HRNI network is human-only
 robustness_runs[, `:=`(
   Dataset  = factor(rename_map[sub("-.*", "", ID)], levels = dataset_levels),
   Category = factor(category_map[sub("^[^-]*-", "", ID)], levels = rev(unname(category_map))),
@@ -249,7 +249,7 @@ library(kableExtra)
 library(stringr)
 comparison_dt[Category == "Maximally biased", Category := "Maximally\nbiased"]
 comparison_dt[Category == "Similarity-reduced", Category := "Similarity-\nreduced"]
-comparison_dt[Category == "ILP split + ILP sampling (HCN)", Category := "ILP split + sampling (HCN)"]  # shorter, fits the column
+comparison_dt[Category == "ILP split + ILP sampling (HRNI)", Category := "ILP split + sampling (HRNI)"]  # shorter, fits the column
 
 # Dataset becomes a group-header row (\multicolumn{9}{l}{Dataset: \textbf{...}}) instead of a column
 dataset_runs <- rle(as.character(comparison_dt$Dataset))
@@ -279,7 +279,7 @@ plot_data <- robustness_runs[, .(
   AUPRC_sd   = pop_sd(AUPRC),
   AUPRC_max  = max(AUPRC)
 ), by = .(Dataset, Category, TestSet)]
-plot_data <- plot_data[Category != "ILP split + ILP sampling (HCN)"]  # HCN goes in the table only
+plot_data <- plot_data[Category != "ILP split + ILP sampling (HRNI)"]  # HRNI goes in the table only
 plot_data[, label_x := pmax(AUPRC + AUPRC_sd, AUPRC_max)]  # labels beyond error bars and dots
 
 dodge_width <- position_dodge(width = 0.9)

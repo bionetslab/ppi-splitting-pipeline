@@ -3,18 +3,18 @@ library(ggplot2)
 library(cowplot)
 library(dplyr)
 
-path_to_robustness <- "/path/to/project/ppi-splitting-pipeline/results_robustness/"
-path_to_hcn <- "/path/to/project/ppi-splitting-pipeline/results_robustness_hcn/"
+path_to_robustness <- "/path/to/ppi-splitting-pipeline/results_robustness/"
+path_to_hcn <- "/path/to/ppi-splitting-pipeline/results_robustness_hcn/"
 
 pop_sd <- function(x) sqrt(mean((x - mean(x))^2))  # population SD, as in bin/robustness_summary.py
 
-# IntAct is multi-species, the HCN is human-only; PDB-Dimers/PINDER have no HCN run
+# IntAct is multi-species, the HRNI network is human-only; PDB-Dimers/PINDER have no HRNI run
 keep_ids <- function(ids) grepl("-(ILP-split-and-sampling|ILP-hcn)$", ids) &
   !sub("-.*", "", ids) %in% c("Intact", "PDB_dimers", "Pinder")
 
 category_map <- c(
   "ILP-split-and-sampling" = "ILP-based split and sampling",
-  "ILP-hcn" = "ILP-based split and sampling from HCN"
+  "ILP-hcn" = "ILP-based split and sampling from HRNI"
 )
 
 ### Fig. 5a: Random Forest results ####
@@ -48,7 +48,7 @@ comparison[, label_x := pmax(AUPRC + AUPRC_sd, AUPRC_max)]  # labels beyond erro
 dodge_width <- position_dodge(width = 0.9)
 hcn_fill <- scale_fill_manual(values = c(
   "ILP-based split and sampling" = "#785ef0",
-  "ILP-based split and sampling from HCN" = "#648fff"
+  "ILP-based split and sampling from HRNI" = "#648fff"
 ))
 error_bars <- geom_errorbar(aes(xmin = AUPRC - AUPRC_sd, xmax = AUPRC + AUPRC_sd),
                             position = dodge_width, width = 0.5, linewidth = 0.4, show.legend = FALSE)
@@ -132,8 +132,8 @@ res_long <- melt(ilp_runs, id.vars = c("ID", "split"),
                  measure.vars = c("bias_deg_term", "bias_self_term", "bias_jac_term"))
 res_long <- res_long[, .(value = mean(value), sd = pop_sd(value)), by = .(ID, split, variable)]
 res_long[, `:=`(Dataset  = factor(rename_map[sub("-.*", "", ID)], levels = unname(rename_map)),
-                Category = factor(c("ILP-split-and-sampling" = "ILP", "ILP-hcn" = "ILP + HCN")[sub("^[^-]*-", "", ID)],
-                                  levels = c("ILP", "ILP + HCN")),
+                Category = factor(c("ILP-split-and-sampling" = "ILP", "ILP-hcn" = "ILP + HRNI")[sub("^[^-]*-", "", ID)],
+                                  levels = c("ILP", "ILP + HRNI")),
                 split    = factor(rename_split_map[split], levels = unname(rename_split_map)))]
 rename_map_bias <- c(
   bias_deg_term = "Degree",

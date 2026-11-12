@@ -5,7 +5,7 @@ library(ggpattern)
 
 # --precomputed_split, split seed 1234, sampling seed 42:
 # candidate pool size (2x/4x/8x the positives) and the GO-BP weight (lambda_GO = 1 vs 0, at 4x).
-repo <- "/path/to/project/ppi-splitting-pipeline/"
+repo <- "/path/to/ppi-splitting-pipeline/"
 path_pool <- paste0(repo, "results_pool_size/multiqc/multiqc_report_data/")
 path_go   <- paste0(repo, "results_go_weight/multiqc/multiqc_report_data/")
 
@@ -48,7 +48,7 @@ bias_colors <- c(
 parse_ids <- function(dt) {
   dt[, `:=`(
     Dataset = sub("-.*", "", ID),
-    Source  = factor(ifelse(grepl("-ILP-hcn-", ID), "HCN", "Random pool"), levels = c("Random pool", "HCN")),
+    Source  = factor(ifelse(grepl("-ILP-hcn-", ID), "HRNI", "Random pool"), levels = c("Random pool", "HRNI")),
     Config  = sub(".*-", "", ID)
   )]
 }
@@ -120,7 +120,7 @@ rf_panel <- function(ts, baseline, xlim, hjust, reverse) {
     geom_vline(xintercept = baseline, linetype = 2) +
     facet_grid(Source ~ ., scales = "free_y", space = "free_y") +
     scale_fill_manual(values = config_colors, breaks = unname(config_labels)) +
-    scale_pattern_manual(values = c("Random pool" = "none", "HCN" = "stripe")) +
+    scale_pattern_manual(values = c("Random pool" = "none", "HRNI" = "stripe")) +
     guides(fill = guide_legend(override.aes = list(pattern = "none"), nrow = 2),
            pattern = guide_legend(override.aes = list(fill = "grey80"))) +
     theme_minimal() +
