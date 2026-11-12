@@ -449,9 +449,12 @@ def _fill_stratum(
             len(priority_keys) + len(filler_keys),
         )
 
+    # Random subsets, not [:quota]: the keys are sorted, so a slice would keep only pairs of low-index (alphabetically
+    # early) proteins and skew the pool's degree distribution.
     if len(priority_keys) >= quota:
-        return priority_keys[:quota]
-    return np.union1d(priority_keys, filler_keys[: quota - len(priority_keys)])
+        return np.sort(rng.choice(priority_keys, size=quota, replace=False))
+    n_fill = min(quota - len(priority_keys), len(filler_keys))
+    return np.union1d(priority_keys, rng.choice(filler_keys, size=n_fill, replace=False))
 
 
 def _degree_weights(pos_pairs, n_proteins) -> np.ndarray:
@@ -564,7 +567,8 @@ def _subsample_candidate_pairs(
         is_self = np.isin(keys, self_keys, assume_unique=True)
         non_self_keys = keys[~is_self]
         n_non_self_target = max(n_target - int(is_self.sum()), 0)
-        keys = np.sort(np.concatenate([keys[is_self], non_self_keys[:n_non_self_target]]))
+        keep = rng.choice(non_self_keys, size=min(n_non_self_target, len(non_self_keys)), replace=False)  # not a sorted slice, see _fill_stratum
+        keys = np.sort(np.concatenate([keys[is_self], keep]))
 
     i_idx, j_idx = keys // n_proteins, keys % n_proteins
     return np.stack([i_idx, j_idx], axis=1).astype(np.int64)

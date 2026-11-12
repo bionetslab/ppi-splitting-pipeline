@@ -6,6 +6,7 @@ include { samplesheetToList } from 'plugin/nf-schema'
 include { DATA_PREP }        from './subworkflows/data_prep'
 include { CLUSTERING }       from './subworkflows/clustering'
 include { SPLIT_POSITIVES }  from './subworkflows/split_positives'
+include { EXTRACT_POSITIVES } from './processes/splitting'
 include { SAMPLE_NEGATIVES } from './subworkflows/sample_negatives'
 include { TRAIN_BASELINE }   from './subworkflows/train_baseline'
 include { QC }               from './subworkflows/qc'
@@ -31,17 +32,34 @@ def buildDatasetsChannel() {
         "negative_sampling_method",
         "neg_ilp_time_limit", "neg_ilp_lambda_degree",
         "neg_ilp_lambda_taxon_pair", "neg_ilp_lambda_self_loop", "neg_ilp_lambda_jaccard",
+        "neg_ilp_pool_factor", "split_seed",
     ]
     def rows = samplesheetToList(params.samplesheet, "${projectDir}/assets/schema_input.json")
 
     return channel.fromList(rows).map { rowList ->
         def row = [fields, rowList].transpose().collectEntries { k, v -> [(k): v] }
 
-        // Every mode except --bias_only reads the raw PPI CSV (DATA_PREP/
-        // SPLIT_POSITIVES); --bias_only never touches it, so it's the one
-        // mode where ppis may be left blank in the samplesheet.
-        if (!params.bias_only && !isGiven(row.ppis)) {
-            error("ppis is required for every samplesheet row unless --bias_only is set (row '${row.id}' is missing it).")
+        // Every mode except --bias_only/--precomputed_split reads the raw PPI CSV (DATA_PREP/
+        // SPLIT_POSITIVES); those two never touch it, so ppis may be left blank there.
+        if (!params.bias_only && !params.precomputed_split && !isGiven(row.ppis)) {
+            error("ppis is required for every samplesheet row unless --bias_only or --precomputed_split is set (row '${row.id}' is missing it).")
+        }
+
+        // precomputed_split skips CLUSTERING/SPLIT_POSITIVES: the positives come from the given labelled splits
+        // (their negatives are discarded and re-sampled), BLAST hits and sequences/GO/species must be supplied.
+        if (params.precomputed_split) {
+            if (!(row.train_ppis && row.val_ppis && row.test_balanced_ppis
+                  && row.sequences && row.go_annotations && row.species && row.blast_results)) {
+                error("--precomputed_split requires every samplesheet row to supply train_ppis, val_ppis, test_balanced_ppis, sequences, go_annotations, species, and blast_results (row '${row.id}' is missing at least one).")
+            }
+        }
+
+        if (isGiven(row.split_seed) && !params.precomputed_split) {
+            error("split_seed is only used with --precomputed_split (row '${row.id}').")
+        }
+        // Without it, --robustness_test would re-label the same given split as each of the 3 split seeds
+        if (params.precomputed_split && params.robustness_test && !isGiven(row.split_seed)) {
+            error("--precomputed_split --robustness_test needs split_seed on every row: one row per released split (row '${row.id}' is missing it).")
         }
 
         // split_only skips FETCH_DATA/CLUSTERING/TRAIN_BASELINE/QC entirely,
@@ -85,7 +103,9 @@ def buildDatasetsChannel() {
             neg_ilp_lambda_taxon_pair: isGiven(row.neg_ilp_lambda_taxon_pair) ? row.neg_ilp_lambda_taxon_pair : params.neg_ilp_lambda_taxon_pair,
             neg_ilp_lambda_self_loop : isGiven(row.neg_ilp_lambda_self_loop)  ? row.neg_ilp_lambda_self_loop  : params.neg_ilp_lambda_self_loop,
             neg_ilp_lambda_jaccard   : isGiven(row.neg_ilp_lambda_jaccard)    ? row.neg_ilp_lambda_jaccard    : params.neg_ilp_lambda_jaccard,
+            neg_ilp_pool_factor      : isGiven(row.neg_ilp_pool_factor)       ? row.neg_ilp_pool_factor       : params.neg_ilp_pool_factor,
         ]
+        if (isGiven(row.split_seed)) meta.split_seed = row.split_seed  // expandSeeds keeps it instead of expanding
         tuple(meta,
             row.ppis              ? file(row.ppis,              checkIfExists: true) : [],
             row.sequences         ? file(row.sequences,         checkIfExists: true) : [],
@@ -106,6 +126,9 @@ def buildDatasetsChannel() {
 workflow {
     if (params.robustness_test && (params.split_only || params.bias_only)) {
         error("--robustness_test needs the full pipeline and can't be combined with --split_only or --bias_only.")
+    }
+    if (params.precomputed_split && (params.split_only || params.bias_only)) {
+        error("--precomputed_split can't be combined with --split_only or --bias_only.")
     }
 
     datasets_ch = buildDatasetsChannel()
@@ -144,29 +167,61 @@ workflow {
             }
         )
 
-        if (params.split_only) {
-            // --split_only: partition/node_mapping are precomputed and required
-            // (validated in buildDatasetsChannel), so CLUSTERING (FETCH_DATA/
-            // RUN_BLAST/MAKE_METIS/RUN_KAHIP) never needs to run at all.
-            partition_ch    = expandSeeds(datasets_ch.map { meta, ppis, sequences, go_annotations, species, blast_results, candidate_network, partition, node_mapping, train_ppis, val_ppis, test_balanced_ppis, test_realistic_ppis -> tuple(meta, partition) }, ['split'])
-            node_mapping_ch = expandSeeds(datasets_ch.map { meta, ppis, sequences, go_annotations, species, blast_results, candidate_network, partition, node_mapping, train_ppis, val_ppis, test_balanced_ppis, test_realistic_ppis -> tuple(meta, node_mapping) }, ['split'])
+        if (params.precomputed_split) {
+            // --precomputed_split: the given labelled splits fix the positives, so CLUSTERING/SPLIT_POSITIVES
+            // never run; only their positives (and FASTA) are recovered, negatives are re-sampled below.
+            labelled = datasets_ch.flatMap { meta, ppis, sequences, go_annotations, species, blast_results, candidate_network, partition, node_mapping, train_ppis, val_ppis, test_balanced_ppis, test_realistic_ppis ->
+                [tuple(meta, "train", train_ppis), tuple(meta, "val", val_ppis), tuple(meta, "test", test_balanced_ppis)]
+            }
+            pos = EXTRACT_POSITIVES(expandSeeds(labelled.combine(data.sequences, by: 0), ['split']))
+            pos_by = pos.branch { meta, label, csv, fasta ->
+                train: label == "train"
+                val:   label == "val"
+                test:  true
+            }
+            pos_train_ppis  = pos_by.train.map { meta, label, csv, fasta -> tuple(meta, csv) }
+            pos_val_ppis    = pos_by.val.map   { meta, label, csv, fasta -> tuple(meta, csv) }
+            pos_test_ppis   = pos_by.test.map  { meta, label, csv, fasta -> tuple(meta, csv) }
+            pos_train_fasta = pos_by.train.map { meta, label, csv, fasta -> tuple(meta, fasta) }
+            pos_val_fasta   = pos_by.val.map   { meta, label, csv, fasta -> tuple(meta, fasta) }
+            pos_test_fasta  = pos_by.test.map  { meta, label, csv, fasta -> tuple(meta, fasta) }
+            sorted_mqc      = channel.empty()  // no splitting ran, so no partitioning/redundancy charts
+            nr_mqc          = channel.empty()
+            blast_ch        = datasets_ch.map { meta, ppis, sequences, go_annotations, species, blast_results, candidate_network, partition, node_mapping, train_ppis, val_ppis, test_balanced_ppis, test_realistic_ppis -> tuple(meta, blast_results) }
         } else {
-            clustered = CLUSTERING(
-                data.sequences, data.lengths,
-                datasets_ch.map { meta, ppis, sequences, go_annotations, species, blast_results, candidate_network, partition, node_mapping, train_ppis, val_ppis, test_balanced_ppis, test_realistic_ppis -> tuple(meta, blast_results) }
-            )
-            partition_ch    = clustered.partition
-            node_mapping_ch = clustered.node_mapping
-        }
+            if (params.split_only) {
+                // --split_only: partition/node_mapping are precomputed and required
+                // (validated in buildDatasetsChannel), so CLUSTERING (FETCH_DATA/
+                // RUN_BLAST/MAKE_METIS/RUN_KAHIP) never needs to run at all.
+                partition_ch    = expandSeeds(datasets_ch.map { meta, ppis, sequences, go_annotations, species, blast_results, candidate_network, partition, node_mapping, train_ppis, val_ppis, test_balanced_ppis, test_realistic_ppis -> tuple(meta, partition) }, ['split'])
+                node_mapping_ch = expandSeeds(datasets_ch.map { meta, ppis, sequences, go_annotations, species, blast_results, candidate_network, partition, node_mapping, train_ppis, val_ppis, test_balanced_ppis, test_realistic_ppis -> tuple(meta, node_mapping) }, ['split'])
+            } else {
+                clustered = CLUSTERING(
+                    data.sequences, data.lengths,
+                    datasets_ch.map { meta, ppis, sequences, go_annotations, species, blast_results, candidate_network, partition, node_mapping, train_ppis, val_ppis, test_balanced_ppis, test_realistic_ppis -> tuple(meta, blast_results) }
+                )
+                partition_ch    = clustered.partition
+                node_mapping_ch = clustered.node_mapping
+            }
 
-        split = SPLIT_POSITIVES(
-            expandSeeds(ppis_ch, ['split']), expandSeeds(data.sequences, ['split']),
-            partition_ch, node_mapping_ch
-        )
+            split = SPLIT_POSITIVES(
+                expandSeeds(ppis_ch, ['split']), expandSeeds(data.sequences, ['split']),
+                partition_ch, node_mapping_ch
+            )
+            pos_train_ppis  = split.train_ppis
+            pos_val_ppis    = split.val_ppis
+            pos_test_ppis   = split.test_ppis
+            pos_train_fasta = split.train_fasta
+            pos_val_fasta   = split.val_fasta
+            pos_test_fasta  = split.test_fasta
+            sorted_mqc      = split.sorted_mqc
+            nr_mqc          = split.nr_mqc
+            blast_ch        = params.split_only ? channel.empty() : clustered.blast_out
+        }
 
         def to_sampling = ['split', 'sampling']
         neg = SAMPLE_NEGATIVES(
-            expandSeeds(split.train_ppis, ['sampling']), expandSeeds(split.val_ppis, ['sampling']), expandSeeds(split.test_ppis, ['sampling']),
+            expandSeeds(pos_train_ppis, ['sampling']), expandSeeds(pos_val_ppis, ['sampling']), expandSeeds(pos_test_ppis, ['sampling']),
             expandSeeds(data.species, to_sampling), expandSeeds(data.go_annotations, to_sampling),
             expandSeeds(datasets_ch.map { meta, ppis, sequences, go_annotations, species, blast_results, candidate_network, partition, node_mapping, train_ppis, val_ppis, test_balanced_ppis, test_realistic_ppis -> tuple(meta, candidate_network) }, to_sampling)
         )
@@ -180,9 +235,9 @@ workflow {
             def to_training = ['sampling', 'training']
             // EMBED_SEQUENCES embeds the union of all these FASTAs once per
             // embedding model, so expanding them doesn't repeat any embedding.
-            train_fasta = expandSeeds(split.train_fasta, to_training)
-            val_fasta   = expandSeeds(split.val_fasta, to_training)
-            test_fasta  = expandSeeds(split.test_fasta, to_training)
+            train_fasta = expandSeeds(pos_train_fasta, to_training)
+            val_fasta   = expandSeeds(pos_val_fasta, to_training)
+            test_fasta  = expandSeeds(pos_test_fasta, to_training)
             neg_train          = expandSeeds(neg.train, ['training'])
             neg_val            = expandSeeds(neg.val, ['training'])
             neg_test_balanced  = expandSeeds(neg.test_balanced, ['training'])
@@ -196,7 +251,7 @@ workflow {
             if (params.robustness_test) {
                 ROBUSTNESS(baseline.mqc)
             } else {
-                blast_out = expandSeeds(clustered.blast_out, all_levels)
+                blast_out = expandSeeds(blast_ch, all_levels)
 
                 bias = BIAS_DIAGNOSTICS(
                     neg_train, neg_val, neg_test_balanced, neg_test_realistic,
@@ -207,7 +262,7 @@ workflow {
                 QC(
                     bias.mqc, blast_out,
                     train_fasta, val_fasta, test_fasta,
-                    split.sorted_mqc, split.nr_mqc, neg.mqc, baseline.mqc
+                    sorted_mqc, nr_mqc, neg.mqc, baseline.mqc
                 )
             }
         }

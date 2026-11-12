@@ -9,7 +9,7 @@
       "id": {
         "type": "string",
         "pattern": "^\\S+$",
-        "errorMessage": "id must be a single whitespace-free token, unique across rows"
+        "errorMessage": "id must be a single whitespace-free token, unique across rows (except rows that differ in split_seed)"
       },
       "ppis": {
         "type": "string",
@@ -175,6 +175,14 @@
       "neg_ilp_lambda_jaccard": {
         "type": "number",
         "minimum": 0
+      },
+      "neg_ilp_pool_factor": {
+        "type": "integer",
+        "minimum": 1
+      },
+      "split_seed": {
+        "type": "integer",
+        "description": "--precomputed_split only: the split seed the given splits were made with. Fixes meta.split_seed instead of expanding over split seeds, so --robustness_test can take one row per released split (same id, different split_seed)."
       }
     },
     "required": ["id"]
