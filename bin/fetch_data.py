@@ -259,6 +259,8 @@ def parse_batch(entries, include_sequence=True, excluded_evidence=DEFAULT_EXCLUD
     seqs, go, species = {}, {}, {}
     dropped = 0
     for entry in entries:
+        if entry.get("entryType") == "Inactive":
+            continue
         acc = str(entry.get("primaryAccession", "")).strip()
         if not acc:
             continue
