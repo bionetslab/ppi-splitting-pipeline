@@ -63,17 +63,26 @@ def build_matrices(clusters_list, protein_to_cluster, ppi_rows):
     return cross_ppi, intra_ppi
 
 
-def _solver_seed_options(solver, seed):
-    """Solver-specific option that seeds the MIP search (mirrors sample_negatives_ilp.py's _solver_options)."""
+def _solver_options(solver, max_sec, seed):
+    """Solver-specific options for time limit and seeding the MIP search (mirrors sample_negatives_ilp.py's _solver_options)."""
     name = (solver or "").upper()
     if name == cp.GUROBI:
-        return {"Seed": seed}
+        return {
+            "TimeLimit": max_sec,
+            "Seed": seed
+            }
     if name == cp.HIGHS:
-        return {"random_seed": seed}
+        return {
+            "time_limit": max_sec,
+            "random_seed": seed
+            }
     if name == cp.SCIP:
-        return {"scip_params": {"randomization/randomseedshift": seed}}
+        return {"scip_params": {
+            "limits/time": max_sec,
+            "randomization/randomseedshift": seed
+            }}
     print(f"Solver {solver or 'auto'} is not seeded; --seed has no effect.", file=sys.stderr)
-    return {}
+    return {"time_limit":max_sec}
 
 
 def solve_ilp(clusters_list, intra_ppi, cross_ppi, splits, names, epsilon, max_sec, solver, seed):
@@ -147,7 +156,7 @@ def solve_ilp(clusters_list, intra_ppi, cross_ppi, splits, names, epsilon, max_s
 
     problem = cp.Problem(objective, constraints)
 
-    kwargs = dict(time_limit=max_sec, verbose=True, **_solver_seed_options(solver, seed))
+    kwargs = dict(verbose=True, **_solver_options(solver, max_sec, seed))
     if solver:
         problem.solve(solver=solver, **kwargs)
     else:
