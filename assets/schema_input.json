@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "PPI splitting pipeline samplesheet schema",
-  "description": "One row per PPI dataset. Only 'id' and 'ppis' are required; every other column may be left blank to fall back to the corresponding value in nextflow.config.",
+  "description": "One row per PPI dataset. Only 'id' and 'ppis' are required ('ppis' not under --bias_only); every other column may be left blank to fall back to the corresponding value in conf/params.config.",
   "type": "array",
   "items": {
     "type": "object",
@@ -38,6 +38,13 @@
         "exists": true,
         "errorMessage": "If supplied, species must be a path to an existing species file species.tsv",
         "pattern": "species\\.tsv$"
+      },
+      "domain_instances": {
+        "type": "string",
+        "format": "file-path",
+        "exists": true,
+        "errorMessage": "If supplied, domain_instances must be a path to an existing instances.tsv (--ddi_mode only, together with sequences and species).",
+        "pattern": "instances\\.tsv$"
       },
       "blast_results": {
         "type": "string",
@@ -154,7 +161,8 @@
       },
       "negative_sampling_method": {
         "type": "string",
-        "enum": ["default", "ilp", "uniform"]
+        "pattern": "^(default|ilp|ilp_candidates|uniform)(,(default|ilp|ilp_candidates|uniform))*$",
+        "errorMessage": "negative_sampling_method must be a comma-separated list, no spaces, of default | ilp | ilp_candidates | uniform (e.g. 'ilp,ilp_candidates')."
       },
       "neg_ilp_time_limit": {
         "type": "number",
@@ -178,5 +186,6 @@
       }
     },
     "required": ["id"]
-  }
+  },
+  "uniqueEntries": ["id"]
 }

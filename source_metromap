@@ -2,20 +2,22 @@
 %%metro track_gap: 1
 %%metro mode: light
 %%metro style: seqera
-%%metro line: pos_random_neg_random | Maximally biased | #ffb000
 %%metro line: pos_kahip_neg_random | Similarity-reduced | #fe6100
-%%metro line: pos_ilp_neg_random | ILP split | #dc267f
 %%metro line: pos_ilp_neg_ilp | ILP split + ILP sampling | #785ef0
+%%metro line: ddi | Domain Mode | #648fff
+%%metro line: pos_random_neg_random | Maximally biased | #ffb000
+%%metro line: pos_ilp_neg_random | ILP split | #dc267f
 %%metro grid: data_prep | 0,0
 %%metro grid: clustering | 1,0
 %%metro grid: split_positives | 2,0
-%%metro grid: sample_negatives | 3,0
+%%metro grid: sample_negatives | 0,1
 %%metro grid: train_baseline | 1,1
 %%metro grid: qc | 2,1
 
 graph LR
     subgraph data_prep [Data Prep]
         fetch_data([Fetch Data])
+        fetch_pfam([Fetch Pfam Domains])
     end
 
     subgraph clustering [Similarity-based partitioning]
@@ -27,10 +29,12 @@ graph LR
         run_blast -->|pos_kahip_neg_random| make_metis
         run_blast -->|pos_ilp_neg_random| make_metis
         run_blast -->|pos_ilp_neg_ilp| make_metis
+        run_blast -->|ddi| make_metis
 
         make_metis -->|pos_kahip_neg_random| run_kahip_k3
         make_metis -->|pos_ilp_neg_random| run_kahip_k100
         make_metis -->|pos_ilp_neg_ilp| run_kahip_k100
+        make_metis -->|ddi| run_kahip_k100
     end
 
     subgraph split_positives [Split Positives]
@@ -38,20 +42,26 @@ graph LR
         sort_ppis([Sort PPIs])
         split_random([Split Random])
         cdhit2d([CD-HIT-2D])
+        select_examples([Select Examples])
 
         sort_ppis -->|pos_kahip_neg_random| cdhit2d
         solve_ilp -->|pos_ilp_neg_random| cdhit2d
         solve_ilp -->|pos_ilp_neg_ilp| cdhit2d
+        solve_ilp -->|ddi| cdhit2d
+        cdhit2d -->|ddi| select_examples
 
     end
 
     subgraph sample_negatives [Sample Negatives]
+        %%metro exit: right | pos_random_neg_random, pos_kahip_neg_random, pos_ilp_neg_random, pos_ilp_neg_ilp, ddi
     	sample_negatives_uniform([Random, uniform])
     	sample_negatives_degree([Random, degree-preserving or uniform])
         sample_negatives_ilp([Solve ILP for bias-minimization])
+        expand_negatives([Expand Negatives])
     end
 
     subgraph train_baseline [Train Baseline]
+        %%metro entry: left | pos_random_neg_random, pos_kahip_neg_random, pos_ilp_neg_random, pos_ilp_neg_ilp, ddi
         embed_sequences([Embed Sequences])
         train_classifier([Train Classifier])
 
@@ -59,6 +69,7 @@ graph LR
         embed_sequences -->|pos_ilp_neg_random| train_classifier
         embed_sequences -->|pos_ilp_neg_ilp| train_classifier
         embed_sequences -->|pos_random_neg_random| train_classifier
+        embed_sequences -->|ddi| train_classifier
     end
 
     subgraph qc [QC]
@@ -69,6 +80,7 @@ graph LR
         bias_analysis -->|pos_ilp_neg_random| multiqc
         bias_analysis -->|pos_ilp_neg_ilp| multiqc
         bias_analysis -->|pos_random_neg_random| multiqc
+        bias_analysis -->|ddi| multiqc
     end
 
 
@@ -103,3 +115,19 @@ graph LR
     embed_sequences -->|pos_ilp_neg_random| bias_analysis
     embed_sequences -->|pos_ilp_neg_ilp| bias_analysis
     embed_sequences -->|pos_random_neg_random| bias_analysis
+
+    %% Domain Mode (--ddi_mode): own stations at data prep, example selection and negative expansion
+    fetch_pfam -->|ddi| run_blast
+    run_kahip_k100 -->|ddi| solve_ilp
+    select_examples -->|ddi| sample_negatives_ilp
+    select_examples -->|ddi| sample_negatives_uniform
+    sample_negatives_ilp -->|ddi| expand_negatives
+    sample_negatives_uniform -->|ddi| expand_negatives
+    expand_negatives -->|ddi| embed_sequences
+    embed_sequences -->|ddi| bias_analysis
+
+    %% The %%metro line order at the top is load-bearing, not the legend order you would pick: it sets
+    %% the track order, and only some orders survive the row wrap into Sample Negatives (most abort
+    %% with a "bundle order" error). This one also puts Expand Negatives level with the degree sampler.
+    %% Rendered with nf-metro 2.1.0 (--diamond-style has no directive, so it goes on the CLI):
+    %%   nf-metro render source_metromap --diamond-style symmetric -o metro_map.svg -o metro_map.png

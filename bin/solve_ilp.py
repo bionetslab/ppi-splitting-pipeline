@@ -16,7 +16,10 @@ import cvxpy as cp
 import numpy as np
 
 from utils import (
+    expand_members,
+    instances_by_family,
     read_fasta,
+    read_instances,
     read_node_mapping,
     read_partition,
     read_ppis,
@@ -197,6 +200,10 @@ def main():
     ap.add_argument("--fasta", required=True, help="Protein FASTA")
     ap.add_argument("--partition", required=True, help="KaHIP partition file")
     ap.add_argument("--node_mapping", required=True, help="KaHIP node_mapping.tsv (node_id -> protein_id)")
+    ap.add_argument(
+        "--instances",
+        help="instances.tsv (DDI mode only): maps families to clans and domain instances",
+    )
     ap.add_argument("--train-split", type=float, default=0.8)
     ap.add_argument("--val-split", type=float, default=0.1)
     ap.add_argument("--test-split", type=float, default=0.1)
@@ -212,16 +219,27 @@ def main():
     names = ["train", "val", "test"]
     assert abs(sum(splits) - 1.0) < 1e-6, "Split fractions must sum to 1"
 
+    inst_rows = read_instances(args.instances) if args.instances else None
+    members = instances_by_family(inst_rows) if inst_rows else None
+    node_label = "families" if inst_rows else "proteins"
+
     print("Loading PPIs …", file=sys.stderr)
     ppi_rows = read_ppis(args.ppis)
 
     print("Reading FASTA …", file=sys.stderr)
     seqs = read_fasta(args.fasta)
-    all_proteins = sorted({p for row in ppi_rows for p in (row["protein1"], row["protein2"])} & set(seqs))
-    print(f"  {len(all_proteins):,} proteins with sequences", file=sys.stderr)
+    seq_ids = set(seqs)
+    # DDI mode: a family is usable iff at least one of its instances has a sequence.
+    all_nodes = {p for row in ppi_rows for p in (row["protein1"], row["protein2"])}
+    all_proteins = sorted(n for n in all_nodes if expand_members({n}, members) & seq_ids)
+    print(f"  {len(all_proteins):,} {node_label} with sequences", file=sys.stderr)
 
     print("Parsing KaHIP partition …", file=sys.stderr)
     protein_to_cluster = parse_kahip_partition(args.partition, args.node_mapping)
+    # DDI mode: the partition is over clans; re-key it to families.
+    if inst_rows:
+        clan_to_cluster = protein_to_cluster
+        protein_to_cluster = {r["family"]: clan_to_cluster[r["clan"]] for r in inst_rows}
     protein_to_cluster = {p: protein_to_cluster[p] for p in all_proteins if p in protein_to_cluster}
 
     clusters_list = sorted(set(protein_to_cluster.values()))
@@ -231,7 +249,7 @@ def main():
         cluster_counts[v] += 1
     sizes = sorted(cluster_counts.values(), reverse=True)
     print(
-        f"  {n_clusters:,} clusters; largest has {sizes[0]:,} proteins, " f"median {sizes[len(sizes)//2]:,}",
+        f"  {n_clusters:,} clusters; largest has {sizes[0]:,} {node_label}, " f"median {sizes[len(sizes)//2]:,}",
         file=sys.stderr,
     )
 
@@ -273,8 +291,8 @@ def main():
         rows = split_rows[name]
         proteins = {p for row in rows for p in (row["protein1"], row["protein2"])}
         write_ppi_csv(rows, f"{name}.csv")
-        write_fasta(seqs, proteins, f"{name}.fasta")
-        print(f"  {name}: {len(rows):,} PPIs, {len(proteins):,} proteins", file=sys.stderr)
+        write_fasta(seqs, expand_members(proteins, members), f"{name}.fasta")
+        print(f"  {name}: {len(rows):,} PPIs, {len(proteins):,} {node_label}", file=sys.stderr)
         split_results.append({"name": name, "n_ppis": len(rows)})
 
     n_ppis_assigned = sum(r["n_ppis"] for r in split_results)

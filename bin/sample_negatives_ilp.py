@@ -58,6 +58,9 @@ def parse_args(argv=None) -> argparse.Namespace:
     ap.add_argument("--positives", required=True, help="Positive PPI CSV for this split")
     ap.add_argument("--output", required=True, help="Output labelled CSV for this split")
     ap.add_argument(
+        "--all-positives", required=True, help="Pre-split positive CSV; none of its pairs is sampled as a negative"
+    )
+    ap.add_argument(
         "--split-name",
         default=None,
         help="Label for this split in diagnostics output " "(default: derived from --output filename)",
@@ -1258,6 +1261,7 @@ def sample_negatives_ilp(
     go_annotations_path=None,
     candidate_network_path=None,
     gurobi_license_path=None,
+    all_pos_ppis=(),
     protein_to_idx=None,
     idx_to_protein=None,
     verbose_rows_out=None,
@@ -1294,6 +1298,13 @@ def sample_negatives_ilp(
             go_membership=go_membership,
             go_sizes=go_sizes,
         )
+    # Positives of other splits, or ones dropped before sampling, must not become negatives.
+    extra = pos_pairs_from_rows(
+        [r for r in all_pos_ppis if r["protein1"] in protein_to_idx and r["protein2"] in protein_to_idx], protein_to_idx
+    )
+    if len(extra):
+        n = len(protein_to_idx)
+        candidates = candidates[~np.isin(candidates[:, 0] * n + candidates[:, 1], extra[:, 0] * n + extra[:, 1])]
     # A split can be empty (a 0 split fraction): write an empty labelled CSV before the
     # diagnostics and build_context below, which fail on zero-size arrays.
     n_pos = int(len(pos_pairs))
@@ -1471,6 +1482,7 @@ if __name__ == "__main__":
         go_annotations_path=args.go_annotations,
         candidate_network_path=args.candidate_network,
         gurobi_license_path=args.gurobi_license,
+        all_pos_ppis=read_ppis(args.all_positives),
         protein_to_idx=protein_to_idx,
         idx_to_protein=idx_to_protein,
         verbose_rows_out=residual_rows,

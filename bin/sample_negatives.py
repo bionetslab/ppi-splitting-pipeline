@@ -39,7 +39,7 @@ def _stub_pool(rows):
     return [p for p, d in degree.items() for _ in range(d)]
 
 
-def sample_negatives(rows, ratio=1, degree_weighted=True, seed=42):
+def sample_negatives(rows, ratio=1, degree_weighted=True, seed=42, exclude=frozenset()):
     """Sample ratio * len(rows) negatives.
 
     degree_weighted=True  uses a stub pool (protein appears degree(p) times),
@@ -47,7 +47,7 @@ def sample_negatives(rows, ratio=1, degree_weighted=True, seed=42):
     degree_weighted=False draws endpoints uniformly at random.
     """
     rng = random.Random(seed)
-    positives = _positive_set(rows)
+    positives = _positive_set(rows) | exclude
     if not rows:
         return []
     pool = _stub_pool(rows) if degree_weighted else sorted({p for r in rows for p in (r["protein1"], r["protein2"])})
@@ -134,6 +134,9 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--positives", required=True, help="Input CSV of positive PPIs for this split")
     ap.add_argument("--output", required=True, help="Output combined CSV path")
+    ap.add_argument(
+        "--all-positives", required=True, help="Pre-split positive CSV; none of its pairs is sampled as a negative"
+    )
     ap.add_argument("--split-name", required=True, help="Split label, e.g. train/val/test_balanced/test_realistic")
     ap.add_argument("--ratio", type=float, default=1.0, help="negatives = ratio * positives")
     ap.add_argument(
@@ -144,7 +147,13 @@ def main():
     args = ap.parse_args()
 
     rows = read_ppis(args.positives)
-    negs = sample_negatives(rows, ratio=args.ratio, degree_weighted=not args.uniform, seed=args.seed)
+    negs = sample_negatives(
+        rows,
+        ratio=args.ratio,
+        degree_weighted=not args.uniform,
+        seed=args.seed,
+        exclude=_positive_set(read_ppis(args.all_positives)),
+    )
     write_combined(rows, negs, args.output)
     print(f"{args.split_name}: {len(rows)} positives → {len(negs)} negatives sampled", file=sys.stderr)
 
