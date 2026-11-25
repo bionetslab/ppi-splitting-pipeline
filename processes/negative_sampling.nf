@@ -11,7 +11,7 @@ process SAMPLE_NEGATIVES_DEGREE {
     // Staged under a fixed name distinct from "${label}${nsuffix}.csv" -- otherwise
     // for label in {train, val} the output would overwrite the staged input
     // symlink, corrupting the upstream task's cached output on -resume.
-    tuple val(meta), val(negset), val(label), val(nsuffix), path(positives, stageAs: 'positives_in.csv'), val(ratio), val(uniform)  // label: "train" | "val" | "test_balanced" | "test_realistic"
+    tuple val(meta), val(negset), val(label), val(nsuffix), path(positives, stageAs: 'positives_in.csv'), val(ratio), val(uniform), path(all_positives, stageAs: 'all_positives.csv')  // label: "train" | "val" | "test_balanced" | "test_realistic"
 
     output:
     tuple val(meta), val(negset), val(label), val(nsuffix), path("${label}${nsuffix}.csv"), emit: labelled
@@ -22,6 +22,7 @@ process SAMPLE_NEGATIVES_DEGREE {
     """
     sample_negatives.py \\
         --positives  ${positives} \\
+        --all-positives ${all_positives} \\
         --output     ${label}${nsuffix}.csv \\
         --split-name ${label} \\
         --ratio      ${ratio} \\
@@ -40,7 +41,7 @@ process SAMPLE_NEGATIVES_ILP {
     input:
     // positives is staged under a fixed name distinct from any "${label}${nsuffix}.csv"
     // output -- see SAMPLE_NEGATIVES_DEGREE above for why that matters.
-    tuple val(meta), val(negset), val(label), val(nsuffix), path(positives, stageAs: 'positives_in.csv'), val(neg_ratio), path(species), path(go_annotations), path(candidate_network)  // label: "train" | "val" | "test_balanced" | "test_realistic"
+    tuple val(meta), val(negset), val(label), val(nsuffix), path(positives, stageAs: 'positives_in.csv'), val(neg_ratio), path(species), path(go_annotations), path(candidate_network), path(all_positives, stageAs: 'all_positives.csv')  // label: "train" | "val" | "test_balanced" | "test_realistic"
     path gurobi_license  // optional; [] if params.gurobi_license is unset
 
     output:
@@ -56,6 +57,7 @@ process SAMPLE_NEGATIVES_ILP {
 
     sample_negatives_ilp.py \\
         --positives          ${positives} \\
+        --all-positives      ${all_positives} \\
         --output             ${label}${nsuffix}.csv \\
         --split-name         ${label} \\
         --neg-ratio          ${neg_ratio} \\

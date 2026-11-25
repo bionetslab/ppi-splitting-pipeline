@@ -35,6 +35,7 @@ workflow SAMPLE_NEGATIVES {
     ddi_files_ch               // tuple(meta, split, examples, cand_examples, universe, reserve, fasta)
     instances_ch                // tuple(meta, instances_or_[])
     negsets_ch                   // tuple(meta, [negset, ...])
+    ppis_ch                       // tuple(meta, path), pre-split positives
 
     main:
     // One channel, one process: each (meta, negset, label) item becomes its own
@@ -85,7 +86,7 @@ workflow SAMPLE_NEGATIVES {
         .map { meta, negset, label, suffix, f, ratio, species, go, cand ->
             tuple(meta, negset, label, suffix, f, ratio, species, go, negset == "ilp_candidates" ? cand : [])
         }
-    ilp_out = SAMPLE_NEGATIVES_ILP(ilp_inputs, neg_gurobi_license_ch)
+    ilp_out = SAMPLE_NEGATIVES_ILP(ilp_inputs.combine(ppis_ch, by: 0), neg_gurobi_license_ch)
 
     uniform_inputs = branched.uniform.map { meta, negset, label, suffix, f, ratio ->
         tuple(meta, negset, label, suffix, f, ratio, true)
@@ -96,7 +97,7 @@ workflow SAMPLE_NEGATIVES {
     default_inputs = branched.default.map { meta, negset, label, suffix, f, ratio ->
         tuple(meta, negset, label, suffix, f, ratio, label == "test_realistic")
     }
-    degree_out = SAMPLE_NEGATIVES_DEGREE(uniform_inputs.mix(default_inputs))
+    degree_out = SAMPLE_NEGATIVES_DEGREE(uniform_inputs.mix(default_inputs).combine(ppis_ch, by: 0))
 
     fam_labelled = ilp_out.labelled.mix(degree_out.labelled)  // tuple(meta, negset, label, suffix, csv)
     fam_mqc      = ilp_out.mqc.mix(degree_out.mqc)

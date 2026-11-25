@@ -366,7 +366,8 @@ workflow PPI_SPLITTING {
             candidate_network_ch,
             // DDI mode only (empty in PPI mode)
             split.ddi_files, data.instances,
-            negsets_ch
+            negsets_ch,
+            ppis_ch
         )
 
         // --split_only stops here: SOLVE_ILP (via SPLIT_POSITIVES) + CDHIT2D +
