@@ -76,7 +76,7 @@ def main():
         finally:
             os.chdir(cwd)
         for name, m in results:
-            rows[name].append("\t".join([id_, id_] + [f"{m[c]:.4f}" for c in COLS]))
+            rows[name].append("\t".join([id_, id_] + ["" if m is None else f"{m[c]:.4f}" for c in COLS]))
 
     for name, lines in rows.items():
         with open(args.outdir / f"multiqc_classifier_metrics_{name}_table.txt", "w") as fh:

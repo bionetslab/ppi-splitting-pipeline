@@ -82,7 +82,7 @@ def parse_args(argv=None) -> argparse.Namespace:
     ap.add_argument("--lambda-jaccard", type=float, default=0.0)
 
     # solver
-    ap.add_argument("--solver", choices=["auto", "gurobi", "scip", "highs"], default="auto")
+    ap.add_argument("--solver", type=str.lower, choices=["auto", "gurobi", "scip", "highs"], default="auto")
     ap.add_argument("--time-limit", type=float, default=200)
     ap.add_argument("--mip-gap", type=float, default=0.01)
     ap.add_argument("--threads", type=int, default=1)
@@ -439,7 +439,8 @@ def _fill_stratum(
             filler_keys = np.union1d(filler_keys, batch_keys[jac == 0])
         else:
             filler_keys = np.union1d(filler_keys, batch_keys)
-    else:
+    # Not a for-else: that also fired when the last round filled the quota.
+    if len(priority_keys) + len(filler_keys) < quota:
         logging.warning(
             "Could not fill a candidate stratum (quota=%d) after %d sampling "
             "rounds; its true population is likely smaller than requested. "
@@ -504,6 +505,9 @@ def _subsample_candidate_pairs(
     if cfg.lambda_self_loop > 0:
         self_pairs = _missing_self_pairs(n_proteins, pos_pairs)
         self_keys = np.sort(self_pairs[:, 0] * n_proteins + self_pairs[:, 1])
+        if pool_keys is not None:
+            # ilp_candidates: only self-pairs the supplied network contains.
+            self_keys = np.intersect1d(self_keys, pool_keys)
     remaining = max(n_target - len(self_keys), 0)
 
     if taxon_codes is not None:
@@ -1294,9 +1298,44 @@ def sample_negatives_ilp(
             go_membership=go_membership,
             go_sizes=go_sizes,
         )
+    # A split can be empty (a 0 split fraction): write an empty labelled CSV before the
+    # diagnostics and build_context below, which fail on zero-size arrays.
+    n_pos = int(len(pos_pairs))
+    n_neg = int(round(neg_ratio * n_pos))
+    if n_pos > 0 and len(candidates) == 0:
+        raise RuntimeError(
+            f"{name}: need {n_neg} negatives but no candidate pairs are available. "
+            f"Supply a larger --candidate-network or lower the negative ratio."
+        )
+    if n_pos == 0:
+        logging.warning(
+            "%s: %d positives / %d negatives / %d candidates -- writing an empty split.",
+            name,
+            n_pos,
+            n_neg,
+            len(candidates),
+        )
+        write_split_csv(pos_ppis, [], idx_to_protein, output_path)
+        return {
+            "split": name,
+            "n_pos": n_pos,
+            "n_neg": n_neg,
+            "r": neg_ratio,
+            "n_candidates": int(len(candidates)),
+            "obj_value": 0.0,
+            "bias_deg_term": 0.0,
+            "bias_tax_term": 0.0,
+            "bias_self_term": 0.0,
+            "bias_jac_term": 0.0,
+            "solver": "none",
+            "wall_time_s": 0.0,
+            "mip_gap": 0.0,
+            "status": "empty split",
+        }, None
+
     print(f"Candidate pool size: {len(candidates)}", file=sys.stderr)
     print(
-        f"Number of unique proteins in the candidate set: {np.max(candidates)}",
+        f"Number of unique proteins in the candidate set: {len(np.unique(candidates))}",
         file=sys.stderr,
     )
     print(

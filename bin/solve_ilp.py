@@ -103,6 +103,12 @@ def solve_ilp(clusters_list, intra_ppi, cross_ppi, splits, names, epsilon, max_s
     Objective (minimize): the data loss, i.e., PPIs between clusters assigned to different splits.
         min_X Σ_{i=1}^{n-1}Σ_{j=i+1}^{n} k(c_i,c_j) * (1 - Σ_{s=1}^S x[s,c_i] * x[s,c_j])
     """
+    # Constraint 3 does not keep a fraction-0 split empty, so drop such splits from the
+    # model; main() still writes their (empty) csv/fasta.
+    active = [s for s, frac in enumerate(splits) if frac > 0]
+    splits = [splits[s] for s in active]
+    names = [names[s] for s in active]
+
     n_splits = len(splits)
     n_clusters = len(clusters_list)
 
@@ -164,6 +170,10 @@ def solve_ilp(clusters_list, intra_ppi, cross_ppi, splits, names, epsilon, max_s
 
     if problem.status not in cp.settings.SOLUTION_PRESENT:
         print(f"Solver status: {problem.status}", file=sys.stderr)
+        return None
+    # USER_LIMIT counts as SOLUTION_PRESENT; HiGHS then returns all zeros without an incumbent.
+    if x.value is None or not np.allclose(x.value.sum(axis=0), 1, atol=1e-3):
+        print(f"Solver status: {problem.status}, but no incumbent was found within the time limit.", file=sys.stderr)
         return None
 
     if problem.status == cp.settings.USER_LIMIT:

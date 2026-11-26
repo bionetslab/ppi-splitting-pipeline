@@ -1,0 +1,2 @@
+id,train_ppis,val_ppis,test_balanced_ppis,test_realistic_ppis,go_annotations,species,blast_results,embedding_model
+bias_only,results/results_test/ILP_split/train.csv,results/results_test/ILP_split/val.csv,results/results_test/ILP_split/test_balanced.csv,results/results_test/ILP_split/test_realistic.csv,results/results_test/ILP_split/data/go_annotations.tsv,results/results_test/ILP_split/data/species.tsv,results/results_test/ILP_split/similarities/all_vs_all.tsv,results/results_test/_shared/embeddings/embeddings_none.npz

@@ -1,0 +1,106 @@
+name: Run pipeline tests
+
+on:
+  pull_request:
+    branches: [main, dev]
+    # Skipped only if every changed file matches; CI runs on environment_test.yml, not these env files/images.
+    paths-ignore:
+      - "manuscript_figures/**"
+      - "prep_datasets/**"
+      - "samplesheets/**"
+      - "docker/**"
+      - "**.md"
+      - "**.png"
+      - "**.svg"
+      - "LICENSE"
+      - "source_metromap"
+      - ".gitignore"
+      - ".dockerignore"
+      - "environment.yml"
+      - "environment_split_only.yml"
+      - ".github/workflows/publish-docker.yml"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NXF_CONDA_CACHEDIR: ${{ github.workspace }}/../nf-conda  # outside the checkout, stable across runs
+
+defaults:
+  run:
+    shell: bash -el {0}  # login shell, so conda is on PATH
+
+jobs:
+  full:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup-pipeline
+
+      - name: Run test profile
+        run: nextflow run main.nf -profile test -with-conda environment_test.yml -ansi-log false
+
+      # Inputs for the mode jobs below (their samplesheets point into results/results_test).
+      - uses: actions/upload-artifact@v5
+        with:
+          name: results-test
+          path: results/results_test
+
+      - name: Upload Nextflow log
+        if: failure()
+        uses: actions/upload-artifact@v5
+        with:
+          name: nextflow-log-full
+          path: .nextflow.log
+
+  # Independent of full, so it runs alongside full -> modes. One row keeps it to 27 seed combinations.
+  robustness:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup-pipeline
+
+      - name: Run --robustness_test
+        run: >-
+          nextflow run main.nf -profile test -with-conda environment_test.yml -ansi-log false
+          --robustness_test
+          --samplesheet assets/samplesheet_test_robustness.csv
+          --outdir results/results_test_robustness
+
+      - name: Upload Nextflow log
+        if: failure()
+        uses: actions/upload-artifact@v5
+        with:
+          name: nextflow-log-robustness
+          path: .nextflow.log
+
+  modes:
+    needs: full
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        mode: [split_only, bias_only, precomputed_split]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup-pipeline
+
+      - uses: actions/download-artifact@v5
+        with:
+          name: results-test
+          path: results/results_test
+
+      - name: Run --${{ matrix.mode }}
+        run: >-
+          nextflow run main.nf -profile test -with-conda environment_test.yml -ansi-log false
+          --${{ matrix.mode }}
+          --samplesheet assets/samplesheet_test_${{ matrix.mode }}.csv
+          --outdir results/results_test_${{ matrix.mode }}
+
+      - name: Upload Nextflow log
+        if: failure()
+        uses: actions/upload-artifact@v5
+        with:
+          name: nextflow-log-${{ matrix.mode }}
+          path: .nextflow.log
