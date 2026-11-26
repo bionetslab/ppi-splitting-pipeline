@@ -16,6 +16,7 @@ dependencies:
   - matplotlib=3.11.2
   - plotly=7.2.0
   - pyscipopt=6.2.1
+  - scip=10.0.2  # pyscipopt 6.2.1 links libscip.so.10.0 but allows scip 10.1 (no libscip.so.10.0)
   - pip:
     # CUDA 13.0 build; the wheel's CUDA major must not exceed the node driver's, or
     # torch.cuda.is_available() silently returns False.

@@ -17,6 +17,7 @@ dependencies:
   - matplotlib=3.11.2
   - plotly=7.2.0
   - pyscipopt=6.2.1
+  - scip=10.0.2  # pyscipopt 6.2.1 links libscip.so.10.0 but allows scip 10.1 (no libscip.so.10.0)
   - pip:
     - cvxpy[GUROBI]==1.9.3
     - gurobipy==14.0.0  # what cvxpy's [GUROBI] extra installs, pinned
