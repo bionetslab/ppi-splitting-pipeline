@@ -56,7 +56,7 @@ jobs:
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}${{ matrix.suffix }}
 
-      # Context is the repository root: the Dockerfiles COPY environment.yml and bin/ from there.
+      # Context is the repository root: the Dockerfiles COPY pixi.toml, pixi.lock and bin/ from there.
       - name: Build and push Docker image
         id: build-and-push
         uses: docker/build-push-action@v7
