@@ -18,6 +18,6 @@ dependencies:
     - clarabel==0.11.1
     - scs==3.2.11
     - qdldl==0.1.9.post1
-    - sparsediffpy==0.3.0
+    - sparsediffpy==0.6.1
     - highspy==1.16.0
     - gurobipy==14.0.0
