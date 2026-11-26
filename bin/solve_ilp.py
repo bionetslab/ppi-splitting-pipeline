@@ -63,16 +63,26 @@ def build_matrices(clusters_list, protein_to_cluster, ppi_rows):
     return cross_ppi, intra_ppi
 
 
-def _solver_options(solver, seed, max_sec):
-    """Solver-specific time-limit and seed options; {} for an unknown solver (case-insensitive)."""
-    solver = (solver or "").upper()
-    if solver == cp.GUROBI:
-        return {"TimeLimit": max_sec, "Seed": seed}
-    if solver == cp.HIGHS:
-        return {"time_limit": max_sec, "random_seed": seed}
-    if solver == cp.SCIP:
-        return {"scip_params": {"limits/time": max_sec, "randomization/randomseedshift": seed}}
-    return {}
+def _solver_options(solver, max_sec, seed):
+    """Solver-specific options for time limit and seeding the MIP search (mirrors sample_negatives_ilp.py's _solver_options)."""
+    name = (solver or "").upper()
+    if name == cp.GUROBI:
+        return {
+            "TimeLimit": max_sec,
+            "Seed": seed
+            }
+    if name == cp.HIGHS:
+        return {
+            "time_limit": max_sec,
+            "random_seed": seed
+            }
+    if name == cp.SCIP:
+        return {"scip_params": {
+            "limits/time": max_sec,
+            "randomization/randomseedshift": seed
+            }}
+    print(f"Solver {solver or 'auto'} is not seeded; --seed has no effect.", file=sys.stderr)
+    return {"time_limit":max_sec}
 
 
 def solve_ilp(clusters_list, intra_ppi, cross_ppi, splits, names, epsilon, max_sec, solver, seed):
@@ -152,22 +162,11 @@ def solve_ilp(clusters_list, intra_ppi, cross_ppi, splits, names, epsilon, max_s
 
     problem = cp.Problem(objective, constraints)
 
+    kwargs = dict(verbose=True, **_solver_options(solver, max_sec, seed))
     if solver:
-        solver_opts = _solver_options(solver, seed, max_sec)
-        if not solver_opts:
-            print(
-                f"Warning: no known options for solver {solver}; time limit passed as time_limit, "
-                f"tie-breaking unseeded.",
-                file=sys.stderr,
-            )
-            solver_opts = {"time_limit": max_sec}
-        problem.solve(solver=solver, verbose=True, **solver_opts)
+        problem.solve(solver=solver, **kwargs)
     else:
-        print(
-            "Warning: no --solver given, so the solve is unseeded; pass --solver for a reproducible split.",
-            file=sys.stderr,
-        )
-        problem.solve(time_limit=max_sec, verbose=True)
+        problem.solve(**kwargs)
 
     if problem.status not in cp.settings.SOLUTION_PRESENT:
         print(f"Solver status: {problem.status}", file=sys.stderr)
@@ -205,7 +204,7 @@ def main():
     )
     ap.add_argument("--max-sec", type=int, default=300, help="ILP solver time limit in seconds (default 300)")
     ap.add_argument("--solver", default=None, help="CVXPY solver name, e.g. SCIP, GLPK_MI (default: auto)")
-    ap.add_argument("--seed", type=int, default=42, help="solver tie-breaking seed (default 42)")
+    ap.add_argument("--seed", type=int, default=42, help="Solver random seed (GUROBI, HIGHS, SCIP only)")
     args = ap.parse_args()
 
     splits = [args.train_split, args.val_split, args.test_split]

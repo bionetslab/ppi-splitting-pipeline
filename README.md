@@ -66,6 +66,46 @@ profiles {
 }
 ```
 
+### Seeds and robustness test
+
+Each source of randomness has its own seed:
+
+| Parameter         | Default | Controls                                                                  |
+|-------------------|---------|---------------------------------------------------------------------------|
+| `--split_seed`    | 1234    | KaHIP partitioning, the split ILP solver, and `split_method=random`       |
+| `--sampling_seed` | 42      | Negative sampling (degree-preserving, uniform, and the ILP sampler)       |
+| `--training_seed` | 42      | Baseline RandomForest classifier                                          |
+| `--bias_seed`     | 42      | Bias diagnostics and heatmap subsampling (analysis only)                  |
+
+`--robustness_test` runs every combination of three hard-coded seeds per source
+(split: 1234, 1, 2; sampling: 42, 1, 2; training: 42, 1, 2), i.e. 3 partitions, 9 negative
+samplings and 27 classifier trainings per dataset. BLAST, METIS and the embeddings are computed
+only once. The first seed of each list is the default, so one combination reproduces a normal run.
+Bias diagnostics and QC are skipped; the MultiQC report instead shows a per-dataset table with the
+mean and standard deviation of every classifier metric, split into the contribution of each seed
+source. Outputs land in `results/<id>/robustness/split<S>/sampling<N>/training<T>/`, with the
+summary in `results/<id>/robustness/robustness_runs.tsv` and `robustness_summary_mqc.tsv`.
+`--robustness_test` can't be combined with `--split_only` or `--bias_only`.
+
+```
+nextflow run main.nf --samplesheet samplesheet.csv --outdir results_robustness --robustness_test
+```
+
+### Re-sample negatives on fixed splits
+
+`--precomputed_split` keeps the positives of existing labelled splits and re-runs only negative sampling,
+training, bias diagnostics and QC, e.g. to vary `neg_ilp_pool_factor` or `neg_ilp_lambda_jaccard` on the
+released splits. Each samplesheet row supplies `train_ppis`, `val_ppis`, `test_balanced_ppis` (their negatives
+are discarded), `blast_results`, `sequences`, `go_annotations` and `species`; `ppis` may be left blank.
+
+```
+nextflow run main.nf --samplesheet samplesheet.csv --outdir results_resampled --precomputed_split
+```
+
+With `--robustness_test`, give one row per released split, all with the same `id` and that split's `split_seed`
+(e.g. 1234, 1, 2, with `train_ppis` etc. from `results/<id>/robustness/split<S>/sampling42/`). Each row is then
+expanded over the sampling and training seeds only, so the summary again covers all 27 seed combinations.
+
 ### View the report
 
 The MultiQC report can be found at `results/multiqc/multiqc_report.html`, which you can view in a browser.

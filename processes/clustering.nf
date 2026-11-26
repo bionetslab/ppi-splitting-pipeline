@@ -44,8 +44,8 @@ process MAKE_METIS {
 }
 
 process RUN_KAHIP {
-    publishDir(path: { "${params.outdir}/${meta.id}/similarities" }, mode: 'copy')
-    tag "${meta.id}: k=${k}"
+    publishDir(path: { params.robustness_test ? "${params.outdir}/${meta.id}/robustness/split${meta.split_seed}" : "${params.outdir}/${meta.id}/similarities" }, mode: 'copy')
+    tag "${meta.id}: k=${k}, seed=${meta.split_seed}"
     label 'error_retry'
 
     input:
@@ -58,7 +58,7 @@ process RUN_KAHIP {
     """
     kaffpa \\
         ${graph} \\
-        --seed=${params.kahip_seed} \\
+        --seed=${meta.split_seed} \\
         --output_filename=partitioned_proteome.txt \\
         --k=${k} \\
         --preconfiguration=${params.kahip_preconfiguration}
