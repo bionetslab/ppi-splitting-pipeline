@@ -3,20 +3,19 @@
 #       -with-docker ghcr.io/bionetslab/ppi-splitting-pipeline-split-only:latest
 # Covers GET_LENGTHS, SORT_PPIS, SOLVE_ILP, CDHIT2D, REMOVE_REDUNDANT,
 # SAMPLE_NEGATIVES_ILP and SAMPLE_NEGATIVES_DEGREE.
-FROM mambaorg/micromamba:2.0.5
 
-USER root
+# pixi.lock's split-only env is the only package source; do not add packages here.
+FROM ghcr.io/prefix-dev/pixi:0.67.1-bookworm-slim AS build
+WORKDIR /app
+COPY pixi.toml pixi.lock ./
+RUN pixi install --locked -e split-only
 
+# Only the env is copied over, at the same path (conda envs are not relocatable).
+FROM debian:bookworm-slim
 # procps: Nextflow's trace polling. ca-certificates: Gurobi WLS license check-out.
 RUN apt-get update \
  && apt-get install -y --no-install-recommends procps ca-certificates \
  && rm -rf /var/lib/apt/lists/*
-
-# environment_split_only.yml is the only package source; do not add packages here.
-ENV PIP_NO_CACHE_DIR=1
-COPY environment_split_only.yml /tmp/environment.yml
-RUN micromamba install -y -n base -f /tmp/environment.yml \
- && micromamba clean --all --yes
-ENV PATH=/opt/conda/bin:$PATH
-
-USER $MAMBA_USER
+COPY --from=build /app/.pixi/envs/split-only /app/.pixi/envs/split-only
+ENV CONDA_PREFIX=/app/.pixi/envs/split-only
+ENV PATH=/app/.pixi/envs/split-only/bin:$PATH

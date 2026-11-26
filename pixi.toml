@@ -1,0 +1,45 @@
+# Ranges here; exact versions live in pixi.lock (commit it). `pixi update` refreshes the lock,
+# release images install with --locked. environment.yml is exported from this, don't edit it.
+[workspace]
+name = "ppi-splitting-pipeline"
+channels = ["conda-forge", "bioconda"]
+platforms = ["linux-64", "linux-aarch64", "osx-arm64"]
+
+[system-requirements]
+macos = "14.0"  # torch >=2.15 ships macosx_14_0_arm64 wheels only
+
+# Core: everything the --split_only processes need (SOLVE_ILP, CDHIT2D, SAMPLE_NEGATIVES_*).
+[dependencies]
+python = ">=3.14,<3.15"
+numpy = ">=2.5"
+scipy = ">=1.18"
+cd-hit = ">=4.8.1"
+pyscipopt = ">=6.2.1"
+scip = "10.0.*"  # pyscipopt 6.2.1 links libscip.so.10.0 but allows scip 10.1 (no libscip.so.10.0)
+
+[pypi-dependencies]
+cvxpy = { version = ">=1.9.3", extras = ["gurobi"] }  # 1.9.2's Gurobi interface builds the model in O(n^2) Python
+highspy = ">=1.16"  # OSS MIP fallback for sample_negatives_ilp.py when Gurobi is unavailable
+pyyaml = ">=6"      # --config YAML for sample_negatives_ilp.py --batch
+
+[feature.pipeline.dependencies]
+certifi = "*"
+blast = ">=2.16"  # 2.17 not built for linux-aarch64
+kahip = ">=3.28"
+multiqc = ">=1.35"
+scikit-learn = ">=1.9"
+matplotlib = ">=3.11"
+plotly = ">=7.2"
+
+# ESM2/ProtT5 embeddings only (bin/embed_sequences.py). On linux-64 PyPI serves the CUDA build; its CUDA
+# major must not exceed the node driver's, or torch.cuda.is_available() silently returns False.
+[feature.embed.pypi-dependencies]
+torch = ">=2.15"
+transformers = ">=5.24"
+sentencepiece = ">=0.2.3"
+protobuf = ">=7"
+
+[environments]
+default = ["pipeline", "embed"]  # conda profile and docker/Dockerfile
+test = ["pipeline"]              # CI: embedding_model=none never imports torch
+split-only = []                  # docker/Dockerfile.split_only

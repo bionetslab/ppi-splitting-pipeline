@@ -1,5 +1,5 @@
 name: Set up pipeline test environment
-description: Java, Nextflow, conda, and the cached environment_test.yml env (NXF_CONDA_CACHEDIR must be set).
+description: Java, Nextflow, and pixi's cached test environment (from pixi.lock).
 runs:
   using: composite
   steps:
@@ -12,15 +12,10 @@ runs:
       with:
         version: "26.10.5"
 
-    # Only provides the conda binary; Nextflow builds the env from environment_test.yml.
-    - uses: conda-incubator/setup-miniconda@v3
+    # locked: fails if pixi.lock is out of date with pixi.toml.
+    - uses: prefix-dev/setup-pixi@v0.11.3
       with:
-        miniforge-version: latest
-        auto-activate-base: true
-        activate-environment: ""
-
-    # Nextflow names the env by the file's hash and reuses an existing one.
-    - uses: actions/cache@v4
-      with:
-        path: ${{ env.NXF_CONDA_CACHEDIR }}
-        key: nf-conda-${{ runner.os }}-${{ hashFiles('environment_test.yml') }}
+        pixi-version: v0.67.1
+        environments: test
+        locked: true
+        cache: true
