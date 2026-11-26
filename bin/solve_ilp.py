@@ -204,7 +204,7 @@ def main():
     )
     ap.add_argument("--max-sec", type=int, default=300, help="ILP solver time limit in seconds (default 300)")
     ap.add_argument("--solver", default=None, help="CVXPY solver name, e.g. SCIP, GLPK_MI (default: auto)")
-    ap.add_argument("--seed", type=int, default=42, help="Solver random seed (GUROBI, HIGHS, SCIP only)")
+    ap.add_argument("--seed", type=int, default=1234, help="Solver random seed (GUROBI, HIGHS, SCIP only)")
     args = ap.parse_args()
 
     splits = [args.train_split, args.val_split, args.test_split]

@@ -114,8 +114,14 @@ def main():
     embeddings = load_embeddings(args.embeddings)
     print(f"  {len(embeddings)} proteins", file=sys.stderr)
 
-    train_pairs, y_train = read_labelled_csv(args.train)
-    val_pairs, y_val = read_labelled_csv(args.val)
+    results = train_and_evaluate(args.train, args.val, args.test_balanced, args.test_realistic, embeddings, args.seed)
+    write_mqc(results, args.id)
+
+
+def train_and_evaluate(train, val, test_balanced, test_realistic, embeddings, seed):
+    """Tune on val, retrain on train+val, return [(test split name, metrics or None)] for both test sets."""
+    train_pairs, y_train = read_labelled_csv(train)
+    val_pairs, y_val = read_labelled_csv(val)
 
     X_train, y_train = build_X(train_pairs, y_train, embeddings)
     X_val, y_val = build_X(val_pairs, y_val, embeddings)
@@ -128,7 +134,7 @@ def main():
         print("Tuning hyperparameters ...", file=sys.stderr)
         best_auroc, best_cfg = -1.0, None
         for cfg in HP_CONFIGS:
-            clf = RandomForestClassifier(**cfg, random_state=args.seed, n_jobs=-1)
+            clf = RandomForestClassifier(**cfg, random_state=seed, n_jobs=-1)
             clf.fit(X_train, y_train)
             auroc = roc_auc_score(y_val, clf.predict_proba(X_val)[:, 1])
             print(f"  {cfg}  →  val AUROC {auroc:.4f}", file=sys.stderr)
@@ -140,12 +146,12 @@ def main():
     # Retrain on train + val combined (an empty split is a (0,)-shaped array).
     X_all = np.concatenate([X_train, X_val]) if len(X_val) else X_train
     y_all = np.concatenate([y_train, y_val]) if len(y_val) else y_train
-    final_clf = RandomForestClassifier(**best_cfg, random_state=args.seed, n_jobs=-1)
+    final_clf = RandomForestClassifier(**best_cfg, random_state=seed, n_jobs=-1)
     final_clf.fit(X_all, y_all)
 
     # Evaluate on both test sets
     results = []
-    for name, path in [("test_balanced", args.test_balanced), ("test_realistic", args.test_realistic)]:
+    for name, path in [("test_balanced", test_balanced), ("test_realistic", test_realistic)]:
         pairs, y_test_raw = read_labelled_csv(path)
         X_test, y_test = build_X(pairs, y_test_raw, embeddings)
         # An empty or single-class split has no AUROC: report a blank row.
@@ -161,8 +167,7 @@ def main():
             f"{name}: " + "  ".join(f"{k}={v:.4f}" for k, v in metrics.items()),
             file=sys.stderr,
         )
-
-    write_mqc(results, args.id)
+    return results
 
 
 if __name__ == "__main__":

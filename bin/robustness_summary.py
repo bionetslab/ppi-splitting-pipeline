@@ -37,7 +37,7 @@ def read_metrics(path):
         rows = list(csv.DictReader((line for line in fh if not line.startswith("#")), delimiter="\t"))
     if len(rows) != 1:
         sys.exit(f"{path}: expected one data row, found {len(rows)}")
-    return {m: float(rows[0][m]) for m in METRICS}
+    return {m: float(rows[0][m] or "nan") for m in METRICS}  # blank = empty/single-class split
 
 
 def read_runs(manifest):

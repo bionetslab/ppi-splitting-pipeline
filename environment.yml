@@ -6,24 +6,24 @@ channels:
 # Exact pins: the conda profile and docker/Dockerfile resolve the same toolchain.
 dependencies:
   - python=3.14.7
-  - certifi=2026.7.22
-  - blast=2.16.0
+  - certifi=2026.11.20
+  - blast=2.17.0
   - cd-hit=4.8.1
-  - kahip=3.25
+  - kahip=3.28
   - multiqc=1.35
   - scikit-learn=1.9.1
-  - numpy=2.5.3
+  - numpy=2.5.4
   - matplotlib=3.11.2
-  - plotly=7.1.0
+  - plotly=7.2.0
   - pyscipopt=6.2.1
   - pip:
     # CUDA 13.0 build; the wheel's CUDA major must not exceed the node driver's, or
     # torch.cuda.is_available() silently returns False.
-    - torch==2.14.0
-    - transformers==5.17.0
-    - sentencepiece==0.2.2
+    - torch==2.15.0
+    - transformers==5.24.1
+    - sentencepiece==0.2.3
     - protobuf==7.36.2
     - cvxpy[GUROBI]==1.9.3
-    - gurobipy==13.0.3  # what cvxpy's [GUROBI] extra installs, pinned
-    - highspy==1.15.1   # OSS MIP fallback for sample_negatives_ilp.py when Gurobi is unavailable
-    - pyyaml==6.0.3     # --config YAML for sample_negatives_ilp.py --batch
+    - gurobipy==14.0.0  # what cvxpy's [GUROBI] extra installs, pinned
+    - highspy==1.16.0   # OSS MIP fallback for sample_negatives_ilp.py when Gurobi is unavailable
+    - pyyaml==6.0.4     # --config YAML for sample_negatives_ilp.py --batch
