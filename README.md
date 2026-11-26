@@ -12,9 +12,14 @@ Have a look at the [Wiki](https://github.com/bionetslab/ppi-splitting-pipeline/w
 ## Requirements
 
 - [Nextflow](https://www.nextflow.io/) ≥ 26
-- Conda (for the environment) — or install the packages in `environment.yml` manually
+- One of: Docker, Singularity or Apptainer (`-profile docker`, `-profile singularity`, `-profile apptainer`), or Conda (`-profile conda`)
 - Internet access for the initial UniProt fetch (subsequent runs use cached Nextflow work directories)
 - A GPU is recommended but not required for `esm2` and `prot_t5` embedding models
+
+**Reproducibility:** `-profile conda` installs from version ranges, so a later run can pick up newer package versions.
+For exact versions, use a container pinned to a release tag (e.g. `-with-docker ghcr.io/bionetslab/ppi-splitting-pipeline:1.1.3`
+rather than the profiles' `:latest`) or a pixi environment (see [For developers](#for-developers)), both built from `pixi.lock`.
+Versions are locked per platform, and results can still differ between platforms (e.g. linux-64 vs. arm64).
 
 ---
 
@@ -112,3 +117,39 @@ expanded over the sampling and training seeds only, so the summary again covers 
 
 The MultiQC report can be found at `results/multiqc/multiqc_report.html`, which you can view in a browser.
 
+---
+
+## For developers
+
+Dependencies are managed with [pixi](https://pixi.sh): `pixi.toml` declares version ranges, and `pixi.lock` pins
+every package exactly (the release images are built from it). Developers run the pipeline in a pixi environment
+instead of with `-profile conda`/`-profile docker`.
+
+### Set up
+
+1. [Install pixi](https://pixi.sh/latest/#installation).
+2. In the repository, install an environment:
+   ```
+   pixi install            # default: everything, incl. torch for ESM2/ProtT5 (several GB)
+   pixi install -e test    # everything except torch; enough for embedding_model=none (used by CI)
+   ```
+3. Enter it (like `conda activate`) and run Nextflow without a software profile:
+   ```
+   pixi shell
+   nextflow run main.nf -profile test
+   ```
+   For a single command without entering the shell: `pixi run nextflow run main.nf -profile test`.
+
+For an IDE, point the Python interpreter at `.pixi/envs/<env>/bin/python` (e.g. `.pixi/envs/default/bin/python`).
+
+### Changing dependencies
+
+1. Edit `pixi.toml` (or `pixi add <package>`), or refresh everything within the ranges with `pixi update`.
+2. Re-export the file the conda profile reads (CI fails if it is out of date):
+   ```
+   pixi workspace export conda-environment -p linux-64 -n ppi-splitting-pipeline environment.yml
+   ```
+3. Commit `pixi.toml`, `pixi.lock`, and `environment.yml` together.
+
+The environments are `default` (pipeline + embeddings), `test` (pipeline without torch) and `split-only`
+(only what `--split_only` needs; used for the split-only image).

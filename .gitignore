@@ -223,3 +223,6 @@ __marimo__/
 # Streamlit
 .streamlit/secrets.toml
 .Rproj.user
+
+# pixi environments
+.pixi/

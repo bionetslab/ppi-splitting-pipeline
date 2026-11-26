@@ -1,30 +1,28 @@
 name: ppi-splitting-pipeline
 channels:
-  - conda-forge
-  - bioconda
-  - defaults
-# Exact pins: the conda profile and docker/Dockerfile resolve the same toolchain.
+- conda-forge
+- bioconda
+- nodefaults
 dependencies:
-  - python=3.14.7
-  - certifi=2026.11.20
-  - blast=2.17.0
-  - cd-hit=4.8.1
-  - kahip=3.28
-  - multiqc=1.35
-  - scikit-learn=1.9.1
-  - numpy=2.5.4
-  - matplotlib=3.11.2
-  - plotly=7.2.0
-  - pyscipopt=6.2.1
-  - scip=10.0.2  # pyscipopt 6.2.1 links libscip.so.10.0 but allows scip 10.1 (no libscip.so.10.0)
-  - pip:
-    # CUDA 13.0 build; the wheel's CUDA major must not exceed the node driver's, or
-    # torch.cuda.is_available() silently returns False.
-    - torch==2.15.0
-    - transformers==5.24.1
-    - sentencepiece==0.2.3
-    - protobuf==7.36.2
-    - cvxpy[GUROBI]==1.9.3
-    - gurobipy==14.0.0  # what cvxpy's [GUROBI] extra installs, pinned
-    - highspy==1.16.0   # OSS MIP fallback for sample_negatives_ilp.py when Gurobi is unavailable
-    - pyyaml==6.0.4     # --config YAML for sample_negatives_ilp.py --batch
+- certifi *
+- blast >=2.16
+- kahip >=3.28
+- multiqc >=1.35
+- scikit-learn >=1.9
+- matplotlib >=3.11
+- plotly >=7.2
+- python >=3.14,<3.15
+- numpy >=2.5
+- scipy >=1.18
+- cd-hit >=4.8.1
+- pyscipopt >=6.2.1
+- scip 10.0.*
+- pip
+- pip:
+  - torch>=2.15
+  - transformers>=5.24
+  - sentencepiece>=0.2.3
+  - protobuf>=7
+  - cvxpy[gurobi]>=1.9.3
+  - highspy>=1.16
+  - pyyaml>=6
