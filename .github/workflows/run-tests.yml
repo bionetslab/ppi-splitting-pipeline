@@ -54,6 +54,27 @@ jobs:
           name: nextflow-log-full
           path: .nextflow.log
 
+  # Independent of full, so it runs alongside full -> modes. One row keeps it to 27 seed combinations.
+  robustness:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup-pipeline
+
+      - name: Run --robustness_test
+        run: >-
+          nextflow run main.nf -profile test -with-conda environment_test.yml -ansi-log false
+          --robustness_test
+          --samplesheet assets/samplesheet_test_robustness.csv
+          --outdir results/results_test_robustness
+
+      - name: Upload Nextflow log
+        if: failure()
+        uses: actions/upload-artifact@v5
+        with:
+          name: nextflow-log-robustness
+          path: .nextflow.log
+
   modes:
     needs: full
     runs-on: ubuntu-latest
