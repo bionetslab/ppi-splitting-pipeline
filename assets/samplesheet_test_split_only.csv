@@ -1,0 +1,2 @@
+id,ppis,sequences,go_annotations,species,partition,node_mapping,embedding_model,ilp_kahip_k,ilp_max_sec,neg_ilp_time_limit
+split_only,data/test_ppis.csv,results/results_test/ILP_split/data/sequences.fasta,results/results_test/ILP_split/data/go_annotations.tsv,results/results_test/ILP_split/data/species.tsv,results/results_test/ILP_split/similarities/partitioned_proteome.txt,results/results_test/ILP_split/similarities/node_mapping.tsv,none,10,60,60

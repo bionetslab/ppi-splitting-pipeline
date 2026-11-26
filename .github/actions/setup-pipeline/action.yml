@@ -1,0 +1,26 @@
+name: Set up pipeline test environment
+description: Java, Nextflow, conda, and the cached environment_test.yml env (NXF_CONDA_CACHEDIR must be set).
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-java@v5
+      with:
+        distribution: temurin
+        java-version: "21"
+
+    - uses: nf-core/setup-nextflow@v2
+      with:
+        version: "26.10.5"
+
+    # Only provides the conda binary; Nextflow builds the env from environment_test.yml.
+    - uses: conda-incubator/setup-miniconda@v3
+      with:
+        miniforge-version: latest
+        auto-activate-base: true
+        activate-environment: ""
+
+    # Nextflow names the env by the file's hash and reuses an existing one.
+    - uses: actions/cache@v4
+      with:
+        path: ${{ env.NXF_CONDA_CACHEDIR }}
+        key: nf-conda-${{ runner.os }}-${{ hashFiles('environment_test.yml') }}
