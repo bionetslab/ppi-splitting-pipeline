@@ -1,0 +1,39 @@
+name: Check version bump
+
+# A PR into main is a release candidate: manifest.version must be above the last published release.
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check-version:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Compare manifest.version with the latest release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          current=$(sed -n "s/^[[:space:]]*version[[:space:]]*=[[:space:]]*'\([^']*\)'.*/\1/p" nextflow.config)
+          if [ -z "$current" ]; then
+            echo "::error::No manifest.version found in nextflow.config"; exit 1
+          fi
+          latest=$(gh release view --repo "$GITHUB_REPOSITORY" --json tagName --jq .tagName 2>/dev/null || true)
+          latest=${latest#v}
+          if [ -z "$latest" ]; then
+            echo "No published release yet; $current is fine."; exit 0
+          fi
+          highest=$(printf '%s\n%s\n' "$latest" "$current" | sort -V | tail -n1)
+          if [ "$current" = "$latest" ] || [ "$highest" != "$current" ]; then
+            echo "::error file=nextflow.config::manifest.version $current must be greater than the latest release $latest"
+            exit 1
+          fi
+          echo "manifest.version $current > latest release $latest"
