@@ -36,11 +36,13 @@ O14836-2,P12345
 
 You provide all parameters for the pipeline via a samplesheet CSV where one row corresponds to one run. E.g., :
 
-| id        | ppis             | split_method | negative_sampling_method | neg_ilp_solver | gurobi_license     |
-|-----------|------------------|--------------|--------------------------|----------------|--------------------|
-| fast-run  | data/my_ppis.csv | kahip        | default                  |                |                    |
-| split-ilp | data/my_ppis.csv | ilp          | default                  |                |                    |
-| all-ilp   | data/my_ppis.csv | ilp          | ilp                      | gurobi         | path/to/gurobi.lic |
+| id        | ppis             | split_method | negative_sampling_method |
+|-----------|------------------|--------------|--------------------------|
+| fast-run  | data/my_ppis.csv | kahip        | default                  |
+| split-ilp | data/my_ppis.csv | ilp          | default                  |
+| all-ilp   | data/my_ppis.csv | ilp          | ilp                      |
+
+Solvers and the Gurobi license are run-wide parameters, not samplesheet columns: `--ilp_solver`, `--neg_ilp_solver`, `--gurobi_license path/to/gurobi.lic`.
 
 ### Run the pipeline
 
