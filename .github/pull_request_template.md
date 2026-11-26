@@ -1,6 +1,19 @@
-## What changes
+## What is this PR about?
 
-<!-- Short description; link issues/PRs. -->
+<!-- Keep a Changelog (https://keepachangelog.com): one bullet per user-facing change, link issues/PRs.
+     Delete empty sections. A release PR collects the entries of the PRs it contains. -->
+
+### Added
+
+### Changed
+
+### Deprecated
+
+### Removed
+
+### Fixed
+
+### Security
 
 ## Checklist
 
